@@ -33,7 +33,7 @@ const camera = new THREE.PerspectiveCamera(
   0.02,
   40
 );
-camera.position.set(0, 1.32, 0.12);
+camera.position.set(0, 1.54, 0.34);
 
 // 2. Lighting
 const hemiLight = new THREE.HemisphereLight(0xf8fafc, 0x334155, 1.15);
@@ -45,7 +45,7 @@ sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(1024, 1024);
 sunLight.shadow.camera.near = 0.2;
 sunLight.shadow.camera.far = 8;
-const d = 1.9;
+const d = 2.4;
 sunLight.shadow.camera.left = -d;
 sunLight.shadow.camera.right = d;
 sunLight.shadow.camera.top = d;
@@ -57,7 +57,7 @@ const vrFloorGroup = new THREE.Group();
 const gridHelper = new THREE.GridHelper(6, 24, 0x334155, 0x1e293b);
 vrFloorGroup.add(gridHelper);
 const tableSurface = new THREE.Mesh(
-  new THREE.BoxGeometry(1.35, 0.04, 1.05),
+  new THREE.BoxGeometry(1.92, 0.04, 1.44),
   new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.85 })
 );
 tableSurface.position.set(DEFAULT_DIORAMA_POS.x, DEFAULT_DIORAMA_POS.y - 0.02, DEFAULT_DIORAMA_POS.z);

@@ -57,6 +57,8 @@ export class XRAndInputManager {
 
   // Edge-detection for discrete button presses
   private prevSwitchPressed = false;
+  private prevPassPressed = false;
+  private prevTacklePressed = false;
   private prevYPressed = false;
   private prevTriggerPlace = false;
   private waitForKickRelease = false;
@@ -64,6 +66,8 @@ export class XRAndInputManager {
   // Desktop keyboard state
   private readonly keys = new Set<string>();
   private desktopSwitchQueued = false;
+  private desktopPassQueued = false;
+  private desktopTackleQueued = false;
 
   // Scratch math objects
   private readonly tempMatrix = new THREE.Matrix4();
@@ -318,6 +322,12 @@ export class XRAndInputManager {
       if (e.code === 'KeyQ' && !e.repeat) {
         this.desktopSwitchQueued = true;
       }
+      if ((e.code === 'KeyE' || e.code === 'KeyJ') && !e.repeat) {
+        this.desktopPassQueued = true;
+      }
+      if ((e.code === 'KeyC' || e.code === 'KeyF') && !e.repeat) {
+        this.desktopTackleQueued = true;
+      }
       if (e.code === 'KeyR' && !e.repeat) {
         this.callbacks.onResetRequested?.();
       }
@@ -473,7 +483,15 @@ export class XRAndInputManager {
 
   private readXRGameplayInput(): MatchInputState {
     if (this.placementMode || this.activeGrabSlot) {
-      return { moveX: 0, moveZ: 0, sprint: false, kickHeld: false, switchPressed: false };
+      return {
+        moveX: 0,
+        moveZ: 0,
+        sprint: false,
+        kickHeld: false,
+        passPressed: false,
+        tacklePressed: false,
+        switchPressed: false,
+      };
     }
 
     const leftSlot = this.findController('left');
@@ -499,24 +517,32 @@ export class XRAndInputManager {
 
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
 
-    // Kick: Right Trigger (0) or A Button (4)
-    const rawKickHeld = Boolean(
-      rightGp?.buttons[0]?.pressed || rightGp?.buttons[4]?.pressed || rightSlot?.selecting
-    );
+    // Shoot: Right Trigger (0)
+    const rawKickHeld = Boolean(rightGp?.buttons[0]?.pressed || rightSlot?.selecting);
     if (this.waitForKickRelease && !rawKickHeld) {
       this.waitForKickRelease = false;
     }
     const kickHeld = this.waitForKickRelease ? false : rawKickHeld;
 
+    // Dedicated Pass: A Button on Right Controller (4)
+    const passNow = Boolean(rightGp?.buttons[4]?.pressed);
+    const passPressed = passNow && !this.prevPassPressed;
+    this.prevPassPressed = passNow;
+
+    // Defensive Slide Tackle / Lunge: B Button on Right Controller (5)
+    const tackleNow = Boolean(rightGp?.buttons[5]?.pressed);
+    const tacklePressed = tackleNow && !this.prevTacklePressed;
+    this.prevTacklePressed = tackleNow;
+
     // Sprint: Left Trigger (0) or Left Stick Click (3)
     const sprint = Boolean(leftGp?.buttons[0]?.pressed || leftGp?.buttons[3]?.pressed);
 
-    // Switch player: B Button (right 5) or X Button (left 4)
-    const switchNow = Boolean(rightGp?.buttons[5]?.pressed || leftGp?.buttons[4]?.pressed);
+    // Switch player: X Button on Left Controller (4)
+    const switchNow = Boolean(leftGp?.buttons[4]?.pressed);
     const switchPressed = switchNow && !this.prevSwitchPressed;
     this.prevSwitchPressed = switchNow;
 
-    return { moveX, moveZ, sprint, kickHeld, switchPressed };
+    return { moveX, moveZ, sprint, kickHeld, passPressed, tacklePressed, switchPressed };
   }
 
   private readDesktopInput(): MatchInputState {
@@ -535,13 +561,19 @@ export class XRAndInputManager {
 
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
     const switchPressed = this.desktopSwitchQueued;
+    const passPressed = this.desktopPassQueued;
+    const tacklePressed = this.desktopTackleQueued;
     this.desktopSwitchQueued = false;
+    this.desktopPassQueued = false;
+    this.desktopTackleQueued = false;
 
     return {
       moveX,
       moveZ,
       sprint: this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'),
       kickHeld: this.keys.has('Space'),
+      passPressed,
+      tacklePressed,
       switchPressed,
     };
   }
