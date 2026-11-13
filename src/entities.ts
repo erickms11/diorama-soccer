@@ -92,6 +92,9 @@ export class MatchSimulation {
   private ballFreeTimer = 0;
   private goalResetTimer = 0;
   private statusText = '';
+  private kickoffTeam: 0 | 1 = TEAM_BLUE;
+  public matchStarted = false;
+  public paused = false;
   private matchEnded = false;
 
   constructor(fieldRoot: THREE.Group, callbacks: MatchCallbacks = {}) {
@@ -204,22 +207,41 @@ export class MatchSimulation {
     this.fieldRoot.add(this.chargeBarBg);
 
     this.spawnTeams();
+    this.kickoffTeam = TEAM_BLUE;
     this.resetKickoff();
+    this.statusText = 'AGUARDANDO INÍCIO';
+    this.emitScore();
   }
 
-  public resetMatch(): void {
+  public startMatch(): void {
     this.blueScore = 0;
     this.redScore = 0;
     this.remainingSeconds = MATCH_DURATION_SECONDS;
     this.matchEnded = false;
+    this.matchStarted = true;
+    this.paused = false;
     this.goalResetTimer = 0;
     this.statusText = '';
+    this.kickoffTeam = TEAM_BLUE;
     this.resetKickoff();
     this.emitScore();
   }
 
+  public togglePause(): boolean {
+    if (!this.matchStarted || this.matchEnded) return false;
+    this.paused = !this.paused;
+    this.statusText = this.paused ? 'JOGO PAUSADO' : '';
+    this.emitScore();
+    return this.paused;
+  }
+
+  public resetMatch(): void {
+    this.startMatch();
+  }
+
   public resetKickoff(): void {
-    this.ballPos.set(0, BALL_RADIUS + 0.015, 0);
+    const attackDir = this.kickoffTeam === TEAM_BLUE ? 1 : -1;
+    this.ballPos.set(attackDir * 0.012, BALL_RADIUS, 0);
     this.ballVel.set(0, 0, 0);
     this.kickCharge = 0;
     this.wasKickHeld = false;
@@ -227,6 +249,15 @@ export class MatchSimulation {
 
     for (const p of this.players) {
       p.pos.copy(p.homePos);
+      if (p.team === this.kickoffTeam) {
+        if (p.role === 'FWD_L') {
+          p.pos.set(-attackDir * 0.024, 0, 0);
+        } else if (p.role === 'FWD_R') {
+          p.pos.set(-attackDir * 0.065, 0, 0.14);
+        }
+      } else if (p.role === 'FWD_L' || p.role === 'FWD_R') {
+        p.pos.x = attackDir * Math.max(Math.abs(p.homePos.x), 0.24);
+      }
       p.vel.set(0, 0, 0);
       p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
       p.kickCooldown = 0;
@@ -243,6 +274,20 @@ export class MatchSimulation {
 
   public update(dt: number, elapsedTime: number, input: MatchInputState, cameraWorldPos: THREE.Vector3): void {
     const safeDt = Math.min(dt, 0.05);
+
+    if (!this.matchStarted) {
+      if (input.passPressed || input.kickHeld || input.switchPressed) {
+        this.startMatch();
+      } else {
+        this.updateIndicators(elapsedTime, cameraWorldPos);
+        return;
+      }
+    }
+
+    if (this.paused) {
+      this.updateIndicators(elapsedTime, cameraWorldPos);
+      return;
+    }
 
     if (this.matchEnded) {
       this.updateIndicators(elapsedTime, cameraWorldPos);
@@ -701,12 +746,12 @@ export class MatchSimulation {
         this.performTackle(p, input.moveX, input.moveZ);
         return;
       }
-      this.kickCharge = Math.min(1, this.kickCharge + dt * 1.45);
+      this.kickCharge = Math.min(1, this.kickCharge + dt * 1.85);
       this.wasKickHeld = true;
     } else if (this.wasKickHeld) {
       // Released shoot button
       this.wasKickHeld = false;
-      const power = 0.38 + this.kickCharge * 0.62;
+      const power = 0.45 + this.kickCharge * 0.55;
       this.kickCharge = 0;
 
       if (hasBall) {
@@ -720,25 +765,28 @@ export class MatchSimulation {
   private performPass(p: PlayerEntity, aimX = 0, aimZ = 0): void {
     let dirX = Math.cos(p.facingAngle);
     let dirZ = -Math.sin(p.facingAngle);
+    const hasInput = Math.hypot(aimX, aimZ) > 0.15;
 
-    if (Math.hypot(aimX, aimZ) > 0.15) {
+    if (hasInput) {
       const len = Math.hypot(aimX, aimZ);
       dirX = aimX / len;
       dirZ = aimZ / len;
     }
 
-    const mate = this.findPassTarget(p, dirX, dirZ);
-    let speed = 0.72;
+    const mate = this.findPassTarget(p, dirX, dirZ, hasInput);
+    let speed = 1.20;
 
     if (mate) {
-      const targetX = mate.pos.x + mate.vel.x * 0.18;
-      const targetZ = mate.pos.z + mate.vel.z * 0.18;
+      const dRaw = Math.hypot(mate.pos.x - this.ballPos.x, mate.pos.z - this.ballPos.z);
+      const leadTime = THREE.MathUtils.clamp(dRaw * 0.15, 0.04, 0.16);
+      const targetX = mate.pos.x + mate.vel.x * leadTime;
+      const targetZ = mate.pos.z + mate.vel.z * leadTime;
       const dx = targetX - this.ballPos.x;
       const dz = targetZ - this.ballPos.z;
       const d = Math.hypot(dx, dz) || 1;
       dirX = dx / d;
       dirZ = dz / d;
-      speed = THREE.MathUtils.clamp(0.54 + d * 0.48, 0.58, 0.98);
+      speed = THREE.MathUtils.clamp(0.94 + d * 0.95, 0.98, 1.68);
 
       const mateIdx = this.players.indexOf(mate);
       if (mateIdx !== -1) {
@@ -747,12 +795,15 @@ export class MatchSimulation {
       }
     }
 
-    this.ballVel.set(dirX * speed, 0.04, dirZ * speed);
+    const launchDist = PLAYER_RADIUS + BALL_RADIUS + 0.003;
+    this.ballPos.x = p.pos.x + dirX * launchDist;
+    this.ballPos.z = p.pos.z + dirZ * launchDist;
+    this.ballVel.set(dirX * speed, 0.05, dirZ * speed);
     p.facingAngle = Math.atan2(-dirZ, dirX);
     p.kickCooldown = 0.30;
     p.kickAnim = 1;
-    this.ballFreeTimer = 0.16;
-    this.callbacks.onKick?.(0.45);
+    this.ballFreeTimer = 0.18;
+    this.callbacks.onKick?.(0.55);
   }
 
   private performTackle(p: PlayerEntity, aimX = 0, aimZ = 0): void {
@@ -805,10 +856,16 @@ export class MatchSimulation {
       dirZ /= norm;
     }
 
-    const speed = 0.52 + power * 0.72;
+    const launchDist = PLAYER_RADIUS + BALL_RADIUS + 0.003;
+    this.ballPos.x = p.pos.x + dirX * launchDist;
+    this.ballPos.z = p.pos.z + dirZ * launchDist;
+
+    const baseSpeed = p.team === TEAM_BLUE ? 0.98 : 0.78;
+    const powerScale = p.team === TEAM_BLUE ? 1.18 : 0.92;
+    const speed = baseSpeed + power * powerScale;
     this.ballVel.x = dirX * speed + (hasExplicitAim ? 0 : p.vel.x * 0.25);
     this.ballVel.z = dirZ * speed + (hasExplicitAim ? 0 : p.vel.z * 0.25);
-    this.ballVel.y = 0.06 + power * 0.20;
+    this.ballVel.y = 0.07 + power * 0.22;
 
     p.kickCooldown = 0.32;
     p.kickAnim = 1;
@@ -1331,6 +1388,7 @@ export class MatchSimulation {
             this.redScore += 1;
             this.statusText = 'GOL DO VERDE/BRANCO!';
           }
+          this.kickoffTeam = scoringTeam === TEAM_BLUE ? TEAM_RED : TEAM_BLUE;
           this.goalResetTimer = 2.6;
           this.callbacks.onGoal?.(scoringTeam);
           this.emitScore();
@@ -1398,26 +1456,40 @@ export class MatchSimulation {
     return bestIdx;
   }
 
-  private findPassTarget(passer: PlayerEntity, dirX: number, dirZ: number): PlayerEntity | null {
-    let best: PlayerEntity | null = null;
+  private findPassTarget(
+    passer: PlayerEntity,
+    dirX: number,
+    dirZ: number,
+    hasDirectionalInput = false
+  ): PlayerEntity | null {
+    let bestInCone: PlayerEntity | null = null;
     let bestScore = -Infinity;
+    let closestMate: PlayerEntity | null = null;
+    let closestDist = Infinity;
+    const minAlign = hasDirectionalInput ? 0.15 : -0.10;
 
     for (const mate of this.players) {
       if (mate === passer || mate.team !== passer.team || mate.role === 'GK') continue;
       const dx = mate.pos.x - passer.pos.x;
       const dz = mate.pos.z - passer.pos.z;
       const dist = Math.hypot(dx, dz);
-      if (dist < 0.08 || dist > 1.15) continue;
+      if (dist < 0.04) continue;
+
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestMate = mate;
+      }
+
       const align = (dx * dirX + dz * dirZ) / dist;
-      if (align > 0.55) {
-        const score = align - dist * 0.25;
+      if (align > minAlign) {
+        const score = align * 0.85 - dist * 1.25;
         if (score > bestScore) {
           bestScore = score;
-          best = mate;
+          bestInCone = mate;
         }
       }
     }
-    return best;
+    return bestInCone ?? closestMate;
   }
 
   private clampPlayerToPitch(p: PlayerEntity): void {
@@ -1529,7 +1601,7 @@ export class MatchSimulation {
 
       const dirX = Math.cos(active.facingAngle);
       const dirZ = -Math.sin(active.facingAngle);
-      const passMate = this.findPassTarget(active, dirX, dirZ);
+      const passMate = this.findPassTarget(active, dirX, dirZ, false);
       if (passMate) {
         this.passTargetRing.visible = true;
         this.passTargetRing.position.set(passMate.pos.x, 0.0022, passMate.pos.z);

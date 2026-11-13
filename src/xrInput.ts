@@ -14,6 +14,8 @@ export type XRMode = 'desktop' | 'ar' | 'vr';
 export interface XRStatusCallbacks {
   onModeChange?: (mode: XRMode) => void;
   onPlacementChange?: (isPlacing: boolean) => void;
+  onStartRequested?: () => void;
+  onPauseToggleRequested?: () => void;
   onResetRequested?: () => void;
   onStatusMessage?: (msg: string) => void;
 }
@@ -327,6 +329,12 @@ export class XRAndInputManager {
       }
       if ((e.code === 'KeyC' || e.code === 'KeyF') && !e.repeat) {
         this.desktopTackleQueued = true;
+      }
+      if (e.code === 'Enter' && !e.repeat) {
+        this.callbacks.onStartRequested?.();
+      }
+      if (e.code === 'KeyP' && !e.repeat) {
+        this.callbacks.onPauseToggleRequested?.();
       }
       if (e.code === 'KeyR' && !e.repeat) {
         this.callbacks.onResetRequested?.();

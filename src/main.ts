@@ -5,6 +5,8 @@ import { MatchSimulation } from './entities';
 import { StadiumDiorama } from './stadium';
 import { XRAndInputManager } from './xrInput';
 
+const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
+const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
 const btnAr = document.getElementById('btn-ar') as HTMLButtonElement;
 const btnVr = document.getElementById('btn-vr') as HTMLButtonElement;
 const btnReposition = document.getElementById('btn-reposition') as HTMLButtonElement;
@@ -76,13 +78,30 @@ stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
 scene.add(stadium.dioramaRoot);
 
 let goalBannerTimeout: number | undefined;
+let match!: MatchSimulation;
 
-const match = new MatchSimulation(stadium.fieldRoot, {
+function syncMatchUI(): void {
+  if (!match) return;
+  btnStart.textContent = match.matchStarted ? 'Novo Jogo' : 'Iniciar Jogo';
+  btnPause.disabled = !match.matchStarted;
+  btnPause.textContent = match.paused ? 'Continuar Jogo' : 'Pausar Jogo';
+  btnPause.classList.toggle('is-paused', match.paused);
+
+  if (match.paused) {
+    goalBannerEl.textContent = 'JOGO PAUSADO';
+    goalBannerEl.classList.remove('hidden');
+  } else if (goalBannerEl.textContent === 'JOGO PAUSADO') {
+    goalBannerEl.classList.add('hidden');
+  }
+}
+
+match = new MatchSimulation(stadium.fieldRoot, {
   onScoreChange: (blue, red, timeText, statusText) => {
     scoreBlueEl.textContent = String(blue);
     scoreRedEl.textContent = String(red);
     timerEl.textContent = timeText;
     stadium.updateScoreboard(blue, red, timeText, statusText);
+    syncMatchUI();
   },
   onGoal: (team) => {
     stadium.triggerGoalCelebration(2.6);
@@ -98,6 +117,7 @@ const match = new MatchSimulation(stadium.fieldRoot, {
     xrInput.pulseHaptics(0.25 + power * 0.45, 45);
   },
 });
+syncMatchUI();
 
 // 4. XR & Desktop Input Manager
 const xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
@@ -110,8 +130,17 @@ const xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
   onPlacementChange: (placing) => {
     btnReposition.textContent = placing ? 'Confirmar Posição (Gatilho)' : 'Reposicionar Estádio';
   },
+  onStartRequested: () => {
+    match.startMatch();
+    syncMatchUI();
+  },
+  onPauseToggleRequested: () => {
+    match.togglePause();
+    syncMatchUI();
+  },
   onResetRequested: () => {
     match.resetMatch();
+    syncMatchUI();
   },
   onStatusMessage: (msg) => {
     xrStatusEl.textContent = msg;
@@ -150,17 +179,32 @@ async function initWebXRButtons(): Promise<void> {
 
 void initWebXRButtons();
 
+btnStart.addEventListener('click', () => {
+  match.startMatch();
+  syncMatchUI();
+  btnStart.blur();
+});
+btnPause.addEventListener('click', () => {
+  match.togglePause();
+  syncMatchUI();
+  btnPause.blur();
+});
 btnAr.addEventListener('click', () => {
   void xrInput.startSession('ar');
+  btnAr.blur();
 });
 btnVr.addEventListener('click', () => {
   void xrInput.startSession('vr');
+  btnVr.blur();
 });
 btnReposition.addEventListener('click', () => {
   xrInput.setPlacementMode(!xrInput.placementMode);
+  btnReposition.blur();
 });
 btnReset.addEventListener('click', () => {
   match.resetMatch();
+  syncMatchUI();
+  btnReset.blur();
 });
 
 // 6. Resize & Main Animation Loop
