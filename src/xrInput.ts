@@ -64,6 +64,7 @@ export class XRAndInputManager {
   private prevMenuPressed = false;
   private prevBorderClick = false;
   private waitForKickRelease = false;
+  private waitForPassRelease = false;
   private suppressGameplayThisFrame = false;
   private readonly pointerNdc = new THREE.Vector2();
   private desktopPointerDownPos = { x: 0, y: 0 };
@@ -595,12 +596,16 @@ export class XRAndInputManager {
       if (rawKickHeld) {
         this.waitForKickRelease = true;
       }
+      if (passNow) {
+        this.waitForPassRelease = true;
+      }
       return {
         moveX: 0,
         moveZ: 0,
         sprint: false,
         kickHeld: false,
         passPressed: false,
+        passHeld: false,
         tacklePressed: false,
         switchPressed: false,
       };
@@ -624,8 +629,12 @@ export class XRAndInputManager {
 
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
 
-    // Roubar a bola / Tocar: A Button on Right Controller (4)
-    const passPressed = passNow && !this.prevPassPressed;
+    // Roubar a bola / Tocar: A Button on Right Controller (4) (segurar carrega força do passe)
+    if (this.waitForPassRelease && !passNow) {
+      this.waitForPassRelease = false;
+    }
+    const passHeld = this.waitForPassRelease ? false : passNow;
+    const passPressed = passHeld && !this.prevPassPressed;
     this.prevPassPressed = passNow;
 
     // Chute no Gol: B Button on Right Controller (5)
@@ -645,7 +654,16 @@ export class XRAndInputManager {
     const tacklePressed = tackleNow && !this.prevTacklePressed;
     this.prevTacklePressed = tackleNow;
 
-    return { moveX, moveZ, sprint, kickHeld, passPressed, tacklePressed, switchPressed };
+    return {
+      moveX,
+      moveZ,
+      sprint,
+      kickHeld,
+      passPressed,
+      passHeld,
+      tacklePressed,
+      switchPressed,
+    };
   }
 
   private readDesktopInput(): MatchInputState {
@@ -676,17 +694,47 @@ export class XRAndInputManager {
       sprint: this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'),
       kickHeld: this.keys.has('Space'),
       passPressed,
+      passHeld: this.keys.has('KeyE') || this.keys.has('KeyJ'),
       tacklePressed,
       switchPressed,
     };
   }
 
   /**
-   * Fixed stadium-space movement (independent of head/camera orientation).
+   * Maps stick input relative to the viewer-to-stadium direction (ignoring head rotation)
+   * and transforms into `fieldRoot` local XZ so rotated/inverted stadiums never invert controls.
    */
   private projectStickToFieldSpace(rawX: number, rawY: number): { moveX: number; moveZ: number } {
     if (rawX === 0 && rawY === 0) return { moveX: 0, moveZ: 0 };
-    return { moveX: rawX, moveZ: rawY };
+
+    const camPos = this.getCameraWorldPosition(this.tempVecA);
+    const stadiumPos = this.stadium.dioramaRoot.position;
+    let fx = stadiumPos.x - camPos.x;
+    let fz = stadiumPos.z - camPos.z;
+    const fLen = Math.hypot(fx, fz);
+    if (fLen < 0.12) {
+      fx = 0;
+      fz = -1;
+    } else {
+      fx /= fLen;
+      fz /= fLen;
+    }
+
+    // Viewer-right vector in horizontal XZ plane
+    const rx = -fz;
+    const rz = fx;
+
+    const wx = fx * -rawY + rx * rawX;
+    const wz = fz * -rawY + rz * rawX;
+
+    // Transform world movement vector into stadium local XZ space
+    const yaw = this.stadium.dioramaRoot.rotation.y;
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    return {
+      moveX: wx * cos - wz * sin,
+      moveZ: wx * sin + wz * cos,
+    };
   }
 
   private findController(hand: 'left' | 'right'): ControllerSlot | undefined {

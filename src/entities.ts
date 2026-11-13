@@ -43,10 +43,11 @@ export interface MatchInputState {
   moveX: number;         // Local field X (-1..1), already camera-relative
   moveZ: number;         // Local field Z (-1..1), already camera-relative
   sprint: boolean;
-  kickHeld: boolean;     // Shoot button held (Right Trigger / Space)
-  passPressed: boolean;  // Dedicated short/through pass (A button / KeyE / KeyJ)
-  tacklePressed: boolean; // Defensive slide tackle / lunge (B button / KeyC / KeyF)
-  switchPressed: boolean; // Switch player (X button / KeyQ)
+  kickHeld: boolean;     // Shoot button held (B button / Space)
+  passPressed: boolean;  // Pass/steal trigger (A button / KeyE / KeyJ)
+  passHeld: boolean;     // Pass button held to charge power (A button / KeyE / KeyJ)
+  tacklePressed: boolean; // Defensive slide tackle / lunge (X button / KeyC / KeyF)
+  switchPressed: boolean; // Switch player (Left Trigger / KeyQ)
 }
 
 export interface MatchCallbacks {
@@ -89,6 +90,8 @@ export class MatchSimulation {
 
   private kickCharge = 0;
   private wasKickHeld = false;
+  private passCharge = 0;
+  private wasPassHeld = false;
   private autoSwitchCooldown = 0;
   private ballFreeTimer = 0;
   private goalResetTimer = 0;
@@ -285,6 +288,8 @@ export class MatchSimulation {
     this.ballVel.set(0, 0, 0);
     this.kickCharge = 0;
     this.wasKickHeld = false;
+    this.passCharge = 0;
+    this.wasPassHeld = false;
     this.ballFreeTimer = 0;
 
     for (const p of this.players) {
@@ -782,14 +787,20 @@ export class MatchSimulation {
     const hasBall = distToBall < PLAYER_RADIUS + BALL_RADIUS + 0.048 && this.ballPos.y < 0.07;
 
     if (input.passPressed) {
-      // Button A (Quest) / E,J (PC): Pass when on the ball, or steal/switch-and-steal when defending
+      // Button A (Quest) / E,J (PC): Start charging pass when on the ball, or steal/switch-and-steal when defending
       this.kickCharge = 0;
       this.wasKickHeld = false;
       if (hasBall) {
-        this.performPass(p, input.moveX, input.moveZ);
+        this.wasPassHeld = true;
+        this.passCharge = 0.08;
       } else if (distToBall < PLAYER_RADIUS + BALL_RADIUS + 0.14 && p.tackleCooldown <= 0) {
+        this.wasPassHeld = false;
+        this.passCharge = 0;
         this.performSteal(p, input.moveX, input.moveZ);
+        return;
       } else {
+        this.wasPassHeld = false;
+        this.passCharge = 0;
         this.switchToClosestBluePlayer();
         this.autoSwitchCooldown = 0.35;
         const nextP = this.players[this.controlledIndex];
@@ -799,14 +810,30 @@ export class MatchSimulation {
             this.performSteal(nextP, input.moveX, input.moveZ);
           }
         }
+        return;
       }
-      return;
+    }
+
+    if (this.wasPassHeld) {
+      if (input.passHeld) {
+        this.passCharge = Math.min(1, this.passCharge + dt * 1.85);
+        return;
+      }
+      const passPower = this.passCharge;
+      this.passCharge = 0;
+      this.wasPassHeld = false;
+      if (distToBall < PLAYER_RADIUS + BALL_RADIUS + 0.085 && this.ballPos.y < 0.075) {
+        this.performPass(p, passPower, input.moveX, input.moveZ);
+        return;
+      }
     }
 
     if (input.tacklePressed) {
       // Button X (Quest) / C,F (PC): Defensive slide tackle
       this.kickCharge = 0;
       this.wasKickHeld = false;
+      this.passCharge = 0;
+      this.wasPassHeld = false;
       if (p.tackleCooldown <= 0) {
         this.performTackle(p, input.moveX, input.moveZ);
       }
@@ -871,7 +898,7 @@ export class MatchSimulation {
     }
   }
 
-  private performPass(p: PlayerEntity, aimX = 0, aimZ = 0): void {
+  private performPass(p: PlayerEntity, power = 0.35, aimX = 0, aimZ = 0): void {
     let dirX = Math.cos(p.facingAngle);
     let dirZ = -Math.sin(p.facingAngle);
     const hasInput = Math.hypot(aimX, aimZ) > 0.15;
@@ -883,7 +910,8 @@ export class MatchSimulation {
     }
 
     const mate = this.findPassTarget(p, dirX, dirZ, hasInput);
-    let speed = 0.68;
+    const powerBoost = 0.72 + power * 0.78;
+    let speed = 0.58 * powerBoost;
 
     if (mate) {
       const dRaw = Math.hypot(mate.pos.x - this.ballPos.x, mate.pos.z - this.ballPos.z);
@@ -895,7 +923,8 @@ export class MatchSimulation {
       const d = Math.hypot(dx, dz) || 1;
       dirX = dx / d;
       dirZ = dz / d;
-      speed = THREE.MathUtils.clamp(0.56 + d * 1.05, 0.60, 1.12);
+      const baseSpeed = THREE.MathUtils.clamp(0.48 + d * 0.92, 0.52, 0.98);
+      speed = THREE.MathUtils.clamp(baseSpeed * powerBoost, 0.48, 1.48);
 
       const mateIdx = this.players.indexOf(mate);
       if (mateIdx !== -1) {
@@ -907,12 +936,12 @@ export class MatchSimulation {
     const launchDist = PLAYER_RADIUS + BALL_RADIUS + 0.003;
     this.ballPos.x = p.pos.x + dirX * launchDist;
     this.ballPos.z = p.pos.z + dirZ * launchDist;
-    this.ballVel.set(dirX * speed, 0.02, dirZ * speed);
+    this.ballVel.set(dirX * speed, 0.02 + power * 0.06, dirZ * speed);
     p.facingAngle = Math.atan2(-dirZ, dirX);
     p.kickCooldown = 0.30;
     p.kickAnim = 1;
     this.ballFreeTimer = 0.14;
-    this.callbacks.onKick?.(0.50);
+    this.callbacks.onKick?.(0.35 + power * 0.45);
   }
 
   private performTackle(p: PlayerEntity, aimX = 0, aimZ = 0): void {
@@ -1681,32 +1710,33 @@ export class MatchSimulation {
     );
     this.selectionArrow.rotation.y = elapsedTime * 2;
 
-    if (this.kickCharge > 0.02) {
+    const activeCharge = Math.max(this.kickCharge, this.passCharge);
+    if (activeCharge > 0.02) {
       this.chargeBarBg.visible = true;
       this.chargeBarBg.position.set(active.pos.x, 0.126, active.pos.z);
       this.chargeBarBg.lookAt(cameraWorldPos);
-      this.chargeBarFill.scale.x = Math.max(0.05, this.kickCharge);
-      this.chargeBarFill.position.x = -0.016 * (1 - this.kickCharge);
+      this.chargeBarFill.scale.x = Math.max(0.05, activeCharge);
+      this.chargeBarFill.position.x = -0.016 * (1 - activeCharge);
       const fillMat = this.chargeBarFill.material as THREE.MeshBasicMaterial;
-      fillMat.color.setHex(this.kickCharge > 0.75 ? 0xef4444 : this.kickCharge > 0.4 ? 0xfacc15 : 0x22c55e);
+      fillMat.color.setHex(activeCharge > 0.75 ? 0xef4444 : activeCharge > 0.4 ? 0xfacc15 : 0x22c55e);
     } else {
       this.chargeBarBg.visible = false;
     }
 
-    // Directional aim arrow & pass target ring when on the ball (or charging a shot)
+    // Directional aim arrow & pass target ring when on the ball (or charging pass/shot)
     const distBall = Math.hypot(this.ballPos.x - active.pos.x, this.ballPos.z - active.pos.z);
     const showAim = !this.matchEnded && this.goalResetTimer <= 0 &&
-      (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.048 || this.kickCharge > 0.02);
+      (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.048 || activeCharge > 0.02);
     this.aimGuideGroup.visible = showAim;
     if (showAim) {
       this.aimGuideGroup.position.set(active.pos.x, 0, active.pos.z);
       this.aimGuideGroup.rotation.y = active.facingAngle;
       this.aimGuideMat.color.setHex(
-        this.kickCharge > 0.75
+        activeCharge > 0.75
           ? 0xef4444
-          : this.kickCharge > 0.4
+          : activeCharge > 0.4
             ? 0xfacc15
-            : this.kickCharge > 0.02
+            : activeCharge > 0.02
               ? 0x22c55e
               : 0x38bdf8
       );
