@@ -162,6 +162,12 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.btn-scale {
+  background: rgba(6, 78, 59, 0.78);
+  color: #d1fae5;
+  border: 1px solid rgba(52, 211, 153, 0.45);
+}
+
 .xr-status {
   margin: 0;
   align-self: flex-start;

@@ -28,6 +28,7 @@ export interface PlayerEntity {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   homePos: THREE.Vector3;
+  baseHomePos: THREE.Vector3;
   facingAngle: number;
   kickCooldown: number;
   animPhase: number;
@@ -93,9 +94,11 @@ export class MatchSimulation {
   private goalResetTimer = 0;
   private statusText = '';
   private kickoffTeam: 0 | 1 = TEAM_BLUE;
+  public currentHalf: 1 | 2 = 1;
+  public waitingSecondHalf = false;
   public matchStarted = false;
   public paused = false;
-  private matchEnded = false;
+  public matchEnded = false;
 
   constructor(fieldRoot: THREE.Group, callbacks: MatchCallbacks = {}) {
     this.fieldRoot = fieldRoot;
@@ -207,28 +210,64 @@ export class MatchSimulation {
     this.fieldRoot.add(this.chargeBarBg);
 
     this.spawnTeams();
+    this.currentHalf = 1;
+    this.waitingSecondHalf = false;
+    this.applyHalfSides();
     this.kickoffTeam = TEAM_BLUE;
     this.resetKickoff();
     this.statusText = 'AGUARDANDO INÍCIO';
     this.emitScore();
   }
 
+  private getAttackDir(team: 0 | 1): number {
+    return (team === TEAM_BLUE ? 1 : -1) * (this.currentHalf === 1 ? 1 : -1);
+  }
+
+  private applyHalfSides(): void {
+    const sideSign = this.currentHalf === 1 ? 1 : -1;
+    for (const p of this.players) {
+      p.homePos.set(p.baseHomePos.x * sideSign, 0, p.baseHomePos.z * sideSign);
+    }
+  }
+
   public startMatch(): void {
+    if (this.waitingSecondHalf) {
+      this.startSecondHalf();
+      return;
+    }
     this.blueScore = 0;
     this.redScore = 0;
+    this.currentHalf = 1;
+    this.waitingSecondHalf = false;
     this.remainingSeconds = MATCH_DURATION_SECONDS;
     this.matchEnded = false;
     this.matchStarted = true;
     this.paused = false;
     this.goalResetTimer = 0;
     this.statusText = '';
+    this.applyHalfSides();
     this.kickoffTeam = TEAM_BLUE;
     this.resetKickoff();
     this.emitScore();
   }
 
+  public startSecondHalf(): void {
+    this.currentHalf = 2;
+    this.waitingSecondHalf = false;
+    this.matchEnded = false;
+    this.matchStarted = true;
+    this.paused = false;
+    this.goalResetTimer = 0;
+    this.remainingSeconds = MATCH_DURATION_SECONDS;
+    this.statusText = '';
+    this.applyHalfSides();
+    this.kickoffTeam = TEAM_RED;
+    this.resetKickoff();
+    this.emitScore();
+  }
+
   public togglePause(): boolean {
-    if (!this.matchStarted || this.matchEnded) return false;
+    if (!this.matchStarted || this.matchEnded || this.waitingSecondHalf) return false;
     this.paused = !this.paused;
     this.statusText = this.paused ? 'JOGO PAUSADO' : '';
     this.emitScore();
@@ -236,11 +275,12 @@ export class MatchSimulation {
   }
 
   public resetMatch(): void {
+    this.waitingSecondHalf = false;
     this.startMatch();
   }
 
   public resetKickoff(): void {
-    const attackDir = this.kickoffTeam === TEAM_BLUE ? 1 : -1;
+    const attackDir = this.getAttackDir(this.kickoffTeam);
     this.ballPos.set(attackDir * 0.012, BALL_RADIUS, 0);
     this.ballVel.set(0, 0, 0);
     this.kickCharge = 0;
@@ -259,7 +299,7 @@ export class MatchSimulation {
         p.pos.x = attackDir * Math.max(Math.abs(p.homePos.x), 0.24);
       }
       p.vel.set(0, 0, 0);
-      p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
+      p.facingAngle = this.getAttackDir(p.team) > 0 ? 0 : Math.PI;
       p.kickCooldown = 0;
       p.kickAnim = 0;
       p.diveTimer = 0;
@@ -278,6 +318,15 @@ export class MatchSimulation {
     if (!this.matchStarted) {
       if (input.passPressed || input.kickHeld || input.switchPressed) {
         this.startMatch();
+      } else {
+        this.updateIndicators(elapsedTime, cameraWorldPos);
+        return;
+      }
+    }
+
+    if (this.waitingSecondHalf) {
+      if (input.passPressed || input.kickHeld) {
+        this.startSecondHalf();
       } else {
         this.updateIndicators(elapsedTime, cameraWorldPos);
         return;
@@ -310,6 +359,19 @@ export class MatchSimulation {
     // Match countdown
     this.remainingSeconds = Math.max(0, this.remainingSeconds - safeDt);
     if (this.remainingSeconds <= 0) {
+      if (this.currentHalf === 1) {
+        this.currentHalf = 2;
+        this.waitingSecondHalf = true;
+        this.paused = false;
+        this.remainingSeconds = MATCH_DURATION_SECONDS;
+        this.applyHalfSides();
+        this.kickoffTeam = TEAM_RED;
+        this.resetKickoff();
+        this.statusText = 'FIM DO 1º TEMPO — TROCA DE LADO!';
+        this.emitScore();
+        return;
+      }
+
       this.matchEnded = true;
       if (this.blueScore > this.redScore) {
         this.statusText = 'FIM DE JOGO: PRETO/BRANCO VENCEU!';
@@ -422,6 +484,7 @@ export class MatchSimulation {
           pos: new THREE.Vector3(x, 0, z),
           vel: new THREE.Vector3(),
           homePos: new THREE.Vector3(x, 0, z),
+          baseHomePos: new THREE.Vector3(x, 0, z),
           facingAngle: team === TEAM_BLUE ? 0 : Math.PI,
           kickCooldown: 0,
           animPhase: i * 1.3,
@@ -719,33 +782,39 @@ export class MatchSimulation {
     const hasBall = distToBall < PLAYER_RADIUS + BALL_RADIUS + 0.048 && this.ballPos.y < 0.07;
 
     if (input.passPressed) {
+      // Button A (Quest) / E,J (PC): Pass when on the ball, or steal/switch-and-steal when defending
       this.kickCharge = 0;
       this.wasKickHeld = false;
       if (hasBall) {
         this.performPass(p, input.moveX, input.moveZ);
+      } else if (distToBall < PLAYER_RADIUS + BALL_RADIUS + 0.14 && p.tackleCooldown <= 0) {
+        this.performSteal(p, input.moveX, input.moveZ);
       } else {
         this.switchToClosestBluePlayer();
         this.autoSwitchCooldown = 0.35;
+        const nextP = this.players[this.controlledIndex];
+        if (nextP) {
+          const nextDist = Math.hypot(this.ballPos.x - nextP.pos.x, this.ballPos.z - nextP.pos.z);
+          if (nextDist < PLAYER_RADIUS + BALL_RADIUS + 0.16 && nextP.tackleCooldown <= 0) {
+            this.performSteal(nextP, input.moveX, input.moveZ);
+          }
+        }
       }
       return;
     }
 
     if (input.tacklePressed) {
+      // Button X (Quest) / C,F (PC): Defensive slide tackle
       this.kickCharge = 0;
       this.wasKickHeld = false;
-      if (hasBall) {
-        this.performPass(p, input.moveX, input.moveZ);
-      } else if (p.tackleCooldown <= 0) {
+      if (p.tackleCooldown <= 0) {
         this.performTackle(p, input.moveX, input.moveZ);
       }
       return;
     }
 
     if (input.kickHeld) {
-      if (!hasBall && distToBall > PLAYER_RADIUS + BALL_RADIUS + 0.08 && p.tackleCooldown <= 0 && !this.wasKickHeld) {
-        this.performTackle(p, input.moveX, input.moveZ);
-        return;
-      }
+      // Button B (Quest) / Space (PC): Charge shot on goal
       this.kickCharge = Math.min(1, this.kickCharge + dt * 1.85);
       this.wasKickHeld = true;
     } else if (this.wasKickHeld) {
@@ -756,9 +825,49 @@ export class MatchSimulation {
 
       if (hasBall) {
         this.performKick(p, power, input.moveX, input.moveZ);
-      } else if (p.tackleCooldown <= 0) {
-        this.performTackle(p, input.moveX, input.moveZ);
+      } else if (distToBall < 0.10 && p.tackleCooldown <= 0) {
+        this.performSteal(p, input.moveX, input.moveZ);
       }
+    }
+  }
+
+  private performSteal(p: PlayerEntity, aimX = 0, aimZ = 0): void {
+    let dirX = Math.cos(p.facingAngle);
+    let dirZ = -Math.sin(p.facingAngle);
+
+    const dxBall = this.ballPos.x - p.pos.x;
+    const dzBall = this.ballPos.z - p.pos.z;
+    const distBall = Math.hypot(dxBall, dzBall);
+    if (distBall > 0.001) {
+      dirX = dxBall / distBall;
+      dirZ = dzBall / distBall;
+    } else if (Math.hypot(aimX, aimZ) > 0.15) {
+      const len = Math.hypot(aimX, aimZ);
+      dirX = aimX / len;
+      dirZ = aimZ / len;
+    }
+
+    p.facingAngle = Math.atan2(-dirZ, dirX);
+    p.tackleTimer = 0.18;
+    p.tackleCooldown = 0.48;
+
+    const contactDist = PLAYER_RADIUS + BALL_RADIUS;
+    if (distBall < contactDist + 0.085 && this.ballPos.y < 0.075) {
+      for (const other of this.players) {
+        if (other.team === TEAM_RED) {
+          const dRed = Math.hypot(this.ballPos.x - other.pos.x, this.ballPos.z - other.pos.z);
+          if (dRed < contactDist + 0.04) {
+            other.kickCooldown = 0.45;
+          }
+        }
+      }
+      const leadDist = contactDist + 0.002;
+      this.ballPos.x = p.pos.x + dirX * leadDist;
+      this.ballPos.z = p.pos.z + dirZ * leadDist;
+      this.ballVel.x = p.vel.x * 0.5;
+      this.ballVel.z = p.vel.z * 0.5;
+      this.ballFreeTimer = 0;
+      this.callbacks.onKick?.(0.30);
     }
   }
 
@@ -774,7 +883,7 @@ export class MatchSimulation {
     }
 
     const mate = this.findPassTarget(p, dirX, dirZ, hasInput);
-    let speed = 0.56;
+    let speed = 0.42;
 
     if (mate) {
       const dRaw = Math.hypot(mate.pos.x - this.ballPos.x, mate.pos.z - this.ballPos.z);
@@ -786,7 +895,7 @@ export class MatchSimulation {
       const d = Math.hypot(dx, dz) || 1;
       dirX = dx / d;
       dirZ = dz / d;
-      speed = THREE.MathUtils.clamp(0.44 + d * 0.44, 0.46, 0.80);
+      speed = THREE.MathUtils.clamp(0.34 + d * 0.34, 0.36, 0.62);
 
       const mateIdx = this.players.indexOf(mate);
       if (mateIdx !== -1) {
@@ -803,7 +912,7 @@ export class MatchSimulation {
     p.kickCooldown = 0.30;
     p.kickAnim = 1;
     this.ballFreeTimer = 0.14;
-    this.callbacks.onKick?.(0.55);
+    this.callbacks.onKick?.(0.42);
   }
 
   private performTackle(p: PlayerEntity, aimX = 0, aimZ = 0): void {
@@ -843,8 +952,9 @@ export class MatchSimulation {
     }
 
     // Gentle shot assist toward goal mouth when shooting toward opponent goal
-    if (p.team === TEAM_BLUE && dirX > 0.2) {
-      const goalX = HALF_LENGTH;
+    const attackDir = this.getAttackDir(p.team);
+    if (p.team === TEAM_BLUE && dirX * attackDir > 0.2) {
+      const goalX = attackDir * HALF_LENGTH;
       const goalZ = THREE.MathUtils.clamp(dirZ * 0.22, -GOAL_WIDTH * 0.34, GOAL_WIDTH * 0.34);
       const gx = goalX - this.ballPos.x;
       const gz = goalZ - this.ballPos.z;
@@ -874,7 +984,7 @@ export class MatchSimulation {
   }
 
   private updateAIPlayer(p: PlayerEntity, dt: number, isPresser: boolean): void {
-    const attackDir = p.team === TEAM_BLUE ? 1 : -1;
+    const attackDir = this.getAttackDir(p.team);
     const goalX = attackDir * HALF_LENGTH;
     const ownGoalX = -attackDir * HALF_LENGTH;
 
@@ -922,11 +1032,11 @@ export class MatchSimulation {
       const toGoalX = goalX - this.ballPos.x;
       const toGoalZ = -this.ballPos.z;
       const toGoalLen = Math.hypot(toGoalX, toGoalZ) || 1;
-      if (p.pos.x < this.ballPos.x - 0.01 && distBall < 0.09) {
+      if ((p.pos.x - this.ballPos.x) * attackDir > 0.01 && distBall < 0.09) {
         // Steer around the ball when caught on its goal-side so CPU never deadlocks pushing backward
         const sideSign = p.pos.z >= this.ballPos.z ? 1 : -1;
         target.set(
-          THREE.MathUtils.clamp(this.ballPos.x + 0.048, -HALF_LENGTH + 0.06, HALF_LENGTH - 0.06),
+          THREE.MathUtils.clamp(this.ballPos.x - attackDir * 0.048, -HALF_LENGTH + 0.06, HALF_LENGTH - 0.06),
           0,
           THREE.MathUtils.clamp(this.ballPos.z + sideSign * 0.048, -HALF_WIDTH + 0.05, HALF_WIDTH - 0.05)
         );
@@ -972,7 +1082,7 @@ export class MatchSimulation {
               if (mate === p || mate.team !== TEAM_RED || mate.role === 'GK') continue;
               const md = Math.hypot(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z);
               if (md < 0.12 || md > 0.95) continue;
-              const forwardGain = (p.pos.x - mate.pos.x) * 2.0;
+              const forwardGain = (mate.pos.x - p.pos.x) * attackDir * 2.0;
               const oppDist = this.players.reduce((minD, opp) => {
                 if (opp.team !== TEAM_BLUE) return minD;
                 return Math.min(minD, Math.hypot(opp.pos.x - mate.pos.x, opp.pos.z - mate.pos.z));
@@ -983,8 +1093,8 @@ export class MatchSimulation {
                 bestMate = mate;
               }
             }
-            if (bestMate && (bestMate.pos.x < p.pos.x - 0.04 || nearPerimeter || underPressure)) {
-              const px = bestMate.pos.x - 0.04 - this.ballPos.x;
+            if (bestMate && ((bestMate.pos.x - p.pos.x) * attackDir > 0.04 || nearPerimeter || underPressure)) {
+              const px = bestMate.pos.x + attackDir * 0.04 - this.ballPos.x;
               const pz = bestMate.pos.z - this.ballPos.z;
               const pd = Math.hypot(px, pz) || 1;
               const passPower = THREE.MathUtils.clamp(0.38 + pd * 0.38, 0.40, 0.72);
@@ -999,10 +1109,12 @@ export class MatchSimulation {
       }
     } else if (p.team === TEAM_BLUE) {
       // Blue teammates push into attack while keeping a compact central defensive block in front of goal
+      const relHomeX = p.homePos.x * attackDir;
+      const relBallX = this.ballPos.x * attackDir;
       if (p.role === 'FWD_L' || p.role === 'FWD_R') {
-        const baseAdv = p.homePos.x + this.ballPos.x * 0.82 + 0.30;
-        const rawX = this.ballPos.x > -0.15 ? Math.max(baseAdv, this.ballPos.x + 0.20) : baseAdv;
-        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.20, HALF_LENGTH - 0.12);
+        const baseAdv = relHomeX + relBallX * 0.82 + 0.30;
+        const rawX = relBallX > -0.15 ? Math.max(baseAdv, relBallX + 0.20) : baseAdv;
+        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.20, HALF_LENGTH - 0.12) * attackDir;
         target.z = THREE.MathUtils.clamp(
           p.homePos.z * 0.88 + this.ballPos.z * 0.32,
           -HALF_WIDTH + 0.07,
@@ -1010,47 +1122,40 @@ export class MatchSimulation {
         );
       } else if (p.role === 'MID_C') {
         // Central holding midfielder screens the top of the penalty box
-        if (this.ballPos.x < 0) {
-          target.x = THREE.MathUtils.clamp(p.homePos.x + this.ballPos.x * 0.45, -HALF_LENGTH + 0.24, -0.08);
+        if (relBallX < 0) {
+          target.x = THREE.MathUtils.clamp(relHomeX + relBallX * 0.45, -HALF_LENGTH + 0.24, -0.08) * attackDir;
           target.z = THREE.MathUtils.clamp(this.ballPos.z * 0.52, -0.28, 0.28);
         } else {
-          target.x = THREE.MathUtils.clamp(
-            p.homePos.x + this.ballPos.x * 0.68 + 0.14,
-            -HALF_LENGTH + 0.24,
-            HALF_LENGTH * 0.45
-          );
+          target.x =
+            THREE.MathUtils.clamp(relHomeX + relBallX * 0.68 + 0.14, -HALF_LENGTH + 0.24, HALF_LENGTH * 0.45) *
+            attackDir;
           target.z = THREE.MathUtils.clamp(this.ballPos.z * 0.35, -0.26, 0.26);
         }
       } else if (p.role === 'MID_L' || p.role === 'MID_R') {
-        const tuckFactor = this.ballPos.x < 0 ? 0.72 : 0.92;
-        const pushBonus = this.ballPos.x > 0 ? 0.24 : -0.04;
-        target.x = THREE.MathUtils.clamp(
-          p.homePos.x + this.ballPos.x * 0.72 + pushBonus,
-          -HALF_LENGTH + 0.18,
-          HALF_LENGTH * 0.68
-        );
+        const tuckFactor = relBallX < 0 ? 0.72 : 0.92;
+        const pushBonus = relBallX > 0 ? 0.24 : -0.04;
+        target.x =
+          THREE.MathUtils.clamp(relHomeX + relBallX * 0.72 + pushBonus, -HALF_LENGTH + 0.18, HALF_LENGTH * 0.68) *
+          attackDir;
         target.z = THREE.MathUtils.clamp(
-          p.homePos.z * tuckFactor + this.ballPos.z * (this.ballPos.x < 0 ? 0.28 : 0.35),
+          p.homePos.z * tuckFactor + this.ballPos.z * (relBallX < 0 ? 0.28 : 0.35),
           -HALF_WIDTH + 0.07,
           HALF_WIDTH - 0.07
         );
       } else {
         // Center-backs (DEF_L / DEF_R) guard the goal corridor compactly
-        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * 0.085;
-        if (this.ballPos.x < 0.15) {
-          const goalSideX = Math.min(p.homePos.x + this.ballPos.x * 0.38, this.ballPos.x - 0.14);
-          target.x = THREE.MathUtils.clamp(goalSideX, -HALF_LENGTH + 0.13, -0.18);
+        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * 0.085 * attackDir;
+        if (relBallX < 0.15) {
+          const goalSideX = Math.min(relHomeX + relBallX * 0.38, relBallX - 0.14);
+          target.x = THREE.MathUtils.clamp(goalSideX, -HALF_LENGTH + 0.13, -0.18) * attackDir;
           target.z = THREE.MathUtils.clamp(
             this.ballPos.z * 0.52 + slotZ,
             -GOAL_WIDTH * 0.85,
             GOAL_WIDTH * 0.85
           );
         } else {
-          target.x = THREE.MathUtils.clamp(
-            p.homePos.x + this.ballPos.x * 0.35,
-            -HALF_LENGTH + 0.16,
-            -0.16
-          );
+          target.x =
+            THREE.MathUtils.clamp(relHomeX + relBallX * 0.35, -HALF_LENGTH + 0.16, -0.16) * attackDir;
           target.z = THREE.MathUtils.clamp(
             p.homePos.z * 0.75 + this.ballPos.z * 0.25,
             -GOAL_WIDTH * 1.05,
@@ -1060,37 +1165,35 @@ export class MatchSimulation {
       }
     } else {
       // Red AI role-based off-ball tactical shift across the pitch
+      const relHomeX = p.homePos.x * attackDir;
+      const relBallX = this.ballPos.x * attackDir;
       if (p.role === 'FWD_L' || p.role === 'FWD_R') {
-        const pushBonus = this.ballPos.x < 0 ? -0.26 : 0;
+        const pushBonus = relBallX > 0 ? 0.26 : 0;
         const rawX =
-          this.ballPos.x < 0.15
-            ? Math.min(p.homePos.x + this.ballPos.x * 0.78 + pushBonus, this.ballPos.x - 0.18)
-            : p.homePos.x + this.ballPos.x * 0.72;
-        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.14, HALF_LENGTH - 0.18);
+          relBallX > -0.15
+            ? Math.max(relHomeX + relBallX * 0.78 + pushBonus, relBallX + 0.18)
+            : relHomeX + relBallX * 0.72;
+        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.18, HALF_LENGTH - 0.14) * attackDir;
         target.z = THREE.MathUtils.clamp(
           p.homePos.z * 0.88 + this.ballPos.z * 0.34,
           -HALF_WIDTH + 0.06,
           HALF_WIDTH - 0.06
         );
       } else if (p.role === 'MID_L' || p.role === 'MID_C' || p.role === 'MID_R') {
-        const pushBonus = this.ballPos.x < 0 ? -0.20 : 0.06;
-        target.x = THREE.MathUtils.clamp(
-          p.homePos.x + this.ballPos.x * 0.70 + pushBonus,
-          -HALF_LENGTH * 0.68,
-          HALF_LENGTH - 0.18
-        );
+        const pushBonus = relBallX > 0 ? 0.20 : -0.06;
+        target.x =
+          THREE.MathUtils.clamp(relHomeX + relBallX * 0.70 + pushBonus, -HALF_LENGTH + 0.18, HALF_LENGTH * 0.68) *
+          attackDir;
         target.z = THREE.MathUtils.clamp(
           p.homePos.z * 0.90 + this.ballPos.z * 0.36,
           -HALF_WIDTH + 0.06,
           HALF_WIDTH - 0.06
         );
       } else {
-        const dropBonus = this.ballPos.x > 0 ? 0.18 : -0.10;
-        target.x = THREE.MathUtils.clamp(
-          p.homePos.x + this.ballPos.x * 0.55 + dropBonus,
-          -HALF_LENGTH * 0.25,
-          HALF_LENGTH - 0.14
-        );
+        const dropBonus = relBallX < 0 ? -0.18 : 0.10;
+        target.x =
+          THREE.MathUtils.clamp(relHomeX + relBallX * 0.55 + dropBonus, -HALF_LENGTH + 0.14, HALF_LENGTH * 0.25) *
+          attackDir;
         target.z = THREE.MathUtils.clamp(
           p.homePos.z + this.ballPos.z * 0.30,
           -HALF_WIDTH + 0.06,
@@ -1139,7 +1242,7 @@ export class MatchSimulation {
       p.vel.x = THREE.MathUtils.lerp(p.vel.x, (dx / dist) * stepSpeed, velLerp);
       p.vel.z = THREE.MathUtils.lerp(p.vel.z, (dz / dist) * stepSpeed, velLerp);
       if (p.role === 'GK' && p.diveTimer > 0) {
-        p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
+        p.facingAngle = attackDir > 0 ? 0 : Math.PI;
       } else {
         p.facingAngle = Math.atan2(-p.vel.z, p.vel.x);
       }
@@ -1147,7 +1250,7 @@ export class MatchSimulation {
       p.vel.x = THREE.MathUtils.lerp(p.vel.x, 0, Math.min(1, dt * 8.5));
       p.vel.z = THREE.MathUtils.lerp(p.vel.z, 0, Math.min(1, dt * 8.5));
       if (p.role === 'GK' && p.diveTimer > 0) {
-        p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
+        p.facingAngle = attackDir > 0 ? 0 : Math.PI;
       } else {
         // Look at the ball when idle
         p.facingAngle = Math.atan2(-(this.ballPos.z - p.pos.z), this.ballPos.x - p.pos.x);
@@ -1215,7 +1318,7 @@ export class MatchSimulation {
             p.diveTimer = 0.32;
             p.diveDir = Math.abs(this.ballPos.z - p.pos.z) > 0.012 ? Math.sign(this.ballPos.z - p.pos.z) : 0;
           }
-          const attackDir = p.team === TEAM_BLUE ? 1 : -1;
+          const attackDir = this.getAttackDir(p.team);
           const sideSign = this.ballPos.z >= 0 ? 1 : -1;
           this.ballPos.x = p.pos.x + attackDir * (contactDist + 0.006);
           this.ballVel.x = attackDir * 0.68;
@@ -1285,17 +1388,18 @@ export class MatchSimulation {
           this.ballVel.z = nz * 0.22 + sideSign * 0.15;
           this.ballVel.y = 0.11;
         } else {
-          // Red AI dribbles toward Blue goal (-HALF_LENGTH, 0) without pushing ball backward
-          const gx = -HALF_LENGTH - p.pos.x;
+          // Red AI dribbles toward target goal without pushing ball backward
+          const attackDir = this.getAttackDir(p.team);
+          const gx = attackDir * HALF_LENGTH - p.pos.x;
           const gz = -p.pos.z;
           const gd = Math.hypot(gx, gz) || 1;
           const gnx = gx / gd;
           const gnz = gz / gd;
 
-          if (nx > 0.15) {
-            // Ball ended up behind Red player (+X side); guide it laterally around toward -X
+          if (nx * attackDir < -0.15) {
+            // Ball ended up behind Red player; guide it laterally around toward target goal
             const sideSign = nz >= 0 ? 1 : -1;
-            const guideX = -0.35;
+            const guideX = attackDir * 0.35;
             const guideZ = sideSign * 0.94;
             this.ballPos.x = p.pos.x + guideX * (contactDist + 0.002);
             this.ballPos.z = p.pos.z + guideZ * (contactDist + 0.002);
@@ -1380,7 +1484,15 @@ export class MatchSimulation {
     if (inGoalMouthZ && underCrossbar) {
       if (Math.abs(this.ballPos.x) > HALF_LENGTH) {
         if (detectGoals) {
-          const scoringTeam: 0 | 1 = this.ballPos.x > 0 ? TEAM_BLUE : TEAM_RED;
+          const enteredPosX = this.ballPos.x > 0;
+          const scoringTeam: 0 | 1 =
+            this.currentHalf === 1
+              ? enteredPosX
+                ? TEAM_BLUE
+                : TEAM_RED
+              : enteredPosX
+                ? TEAM_RED
+                : TEAM_BLUE;
           if (scoringTeam === TEAM_BLUE) {
             this.blueScore += 1;
             this.statusText = 'GOL DO PRETO/BRANCO!';
@@ -1506,7 +1618,7 @@ export class MatchSimulation {
     if (p.diveTimer > 0) {
       const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.42, 0, 1) * Math.PI);
       p.bodyMesh.position.y = diveArc * 0.024;
-      p.bodyMesh.rotation.x = (p.team === TEAM_BLUE ? 1 : -1) * p.diveDir * diveArc * 0.92;
+      p.bodyMesh.rotation.x = this.getAttackDir(p.team) * p.diveDir * diveArc * 0.92;
       p.bodyMesh.rotation.z = 0;
 
       p.leftArm.rotation.z = 2.45;
@@ -1617,7 +1729,7 @@ export class MatchSimulation {
   private emitScore(): void {
     const mins = Math.floor(this.remainingSeconds / 60);
     const secs = Math.floor(this.remainingSeconds % 60);
-    const timeText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    const timeText = `${this.currentHalf}ºT ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     this.callbacks.onScoreChange?.(this.blueScore, this.redScore, timeText, this.statusText);
   }
 }

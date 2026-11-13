@@ -26,6 +26,7 @@ interface CrowdFan {
 export class StadiumDiorama {
   public readonly dioramaRoot: THREE.Group;
   public readonly fieldRoot: THREE.Group;
+  public readonly borderInteractables: THREE.Object3D[] = [];
 
   private readonly placementOutline: THREE.Group;
   private readonly scoreboardCanvas: HTMLCanvasElement;
@@ -1400,6 +1401,53 @@ export class StadiumDiorama {
     }
   }
 
+  private createBorderButtonMesh(
+    label: string,
+    bgColor: string,
+    strokeColor: string,
+    textColor: string,
+    action: 'shrink' | 'grow' | 'resume',
+    width = 0.68,
+    depth = 0.20
+  ): THREE.Mesh {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 160;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = bgColor;
+      this.roundRect(ctx, 6, 6, canvas.width - 12, canvas.height - 12, 26);
+      ctx.fill();
+
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = strokeColor;
+      ctx.stroke();
+
+      ctx.fillStyle = textColor;
+      ctx.font = 'bold 42px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, canvas.width / 2, canvas.height / 2);
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+
+    const sideMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      roughness: 0.45,
+      metalness: 0.25,
+    });
+    const topMat = new THREE.MeshBasicMaterial({ map: tex });
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, 0.016, depth),
+      [sideMat, sideMat, topMat, sideMat, sideMat, sideMat]
+    );
+    mesh.userData.borderAction = action;
+    return mesh;
+  }
+
   private buildPlacementOutline(): THREE.Group {
     const group = new THREE.Group();
     const boxGeo = new THREE.BoxGeometry(BASE_WIDTH + 0.02, 0.008, BASE_DEPTH + 0.02);
@@ -1415,13 +1463,89 @@ export class StadiumDiorama {
       new THREE.MeshBasicMaterial({
         color: 0x10b981,
         transparent: true,
-        opacity: 0.16,
+        opacity: 0.14,
         side: THREE.DoubleSide,
       })
     );
     pad.rotation.x = -Math.PI / 2;
     pad.position.y = 0.001;
     group.add(pad);
+
+    // Clickable glowing perimeter rails (clicking the stadium border shrinks it)
+    const railMat = new THREE.MeshBasicMaterial({
+      color: 0x34d399,
+      transparent: true,
+      opacity: 0.72,
+    });
+    const railThick = 0.055;
+    const railH = 0.018;
+    const halfW = BASE_WIDTH / 2 + 0.035;
+    const halfD = BASE_DEPTH / 2 + 0.035;
+
+    for (const zSign of [-1, 1]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(BASE_WIDTH + railThick * 2, railH, railThick),
+        railMat
+      );
+      rail.position.set(0, railH / 2, zSign * halfD);
+      rail.userData.borderAction = 'shrink';
+      group.add(rail);
+      this.borderInteractables.push(rail);
+    }
+
+    for (const xSign of [-1, 1]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(railThick, railH, BASE_DEPTH),
+        railMat
+      );
+      rail.position.set(xSign * halfW, railH / 2, 0);
+      rail.userData.borderAction = 'shrink';
+      group.add(rail);
+      this.borderInteractables.push(rail);
+    }
+
+    // Large labeled interactive border bars in front of the stadium (Shrink / Start-Resume / Grow)
+    const borderButtons: Array<{
+      label: string;
+      bg: string;
+      stroke: string;
+      fg: string;
+      action: 'shrink' | 'grow' | 'resume';
+      x: number;
+    }> = [
+      {
+        label: '- DIMINUIR ESTÁDIO',
+        bg: '#7f1d1d',
+        stroke: '#f87171',
+        fg: '#fef2f2',
+        action: 'shrink',
+        x: -0.78,
+      },
+      {
+        label: '▶ INICIAR / CONTINUAR',
+        bg: '#14532d',
+        stroke: '#4ade80',
+        fg: '#f0fdf4',
+        action: 'resume',
+        x: 0,
+      },
+      {
+        label: '+ AUMENTAR ESTÁDIO',
+        bg: '#0c4a6e',
+        stroke: '#38bdf8',
+        fg: '#f0f9ff',
+        action: 'grow',
+        x: 0.78,
+      },
+    ];
+
+    for (const b of borderButtons) {
+      const btnMesh = this.createBorderButtonMesh(b.label, b.bg, b.stroke, b.fg, b.action);
+      btnMesh.position.set(b.x, 0.036, halfD + 0.115);
+      btnMesh.rotation.x = 0.24;
+      group.add(btnMesh);
+      this.borderInteractables.push(btnMesh);
+    }
 
     return group;
   }

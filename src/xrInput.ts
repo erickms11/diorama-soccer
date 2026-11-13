@@ -15,8 +15,10 @@ export interface XRStatusCallbacks {
   onModeChange?: (mode: XRMode) => void;
   onPlacementChange?: (isPlacing: boolean) => void;
   onStartRequested?: () => void;
+  onResumeRequested?: () => void;
   onPauseToggleRequested?: () => void;
   onResetRequested?: () => void;
+  onScaleChange?: (scale: number) => void;
   onStatusMessage?: (msg: string) => void;
 }
 
@@ -57,13 +59,19 @@ export class XRAndInputManager {
   private grabStartYaw = 0;
   private grabStartControllerYaw = 0;
 
+  public borderMenuVisible = false;
+
   // Edge-detection for discrete button presses
   private prevSwitchPressed = false;
   private prevPassPressed = false;
   private prevTacklePressed = false;
-  private prevYPressed = false;
+  private prevMenuPressed = false;
   private prevTriggerPlace = false;
+  private prevBorderClick = false;
   private waitForKickRelease = false;
+  private suppressGameplayThisFrame = false;
+  private readonly pointerNdc = new THREE.Vector2();
+  private desktopPointerDownPos = { x: 0, y: 0 };
 
   // Desktop keyboard state
   private readonly keys = new Set<string>();
@@ -112,13 +120,97 @@ export class XRAndInputManager {
 
     this.setupControllers();
     this.setupKeyboard();
+    this.setupDesktopBorderClicks();
   }
 
   public setPlacementMode(active: boolean): void {
     this.placementMode = active;
-    this.stadium.setPlacementMode(active);
+    this.stadium.setPlacementMode(this.placementMode || this.borderMenuVisible);
     this.reticle.visible = active && this.mode === 'ar';
     this.callbacks.onPlacementChange?.(active);
+  }
+
+  public setBorderMenuVisible(active: boolean): void {
+    this.borderMenuVisible = active;
+    this.stadium.setPlacementMode(this.placementMode || this.borderMenuVisible);
+  }
+
+  public adjustStadiumScale(factor: number): void {
+    const nextScale = THREE.MathUtils.clamp(
+      this.stadium.dioramaRoot.scale.x * factor,
+      MIN_DIORAMA_SCALE,
+      MAX_DIORAMA_SCALE
+    );
+    this.stadium.dioramaRoot.scale.setScalar(nextScale);
+    this.callbacks.onScaleChange?.(nextScale);
+  }
+
+  private applyBorderAction(action: unknown): boolean {
+    if (action === 'shrink') {
+      this.adjustStadiumScale(0.88);
+      this.pulseHaptics(0.3, 35);
+      return true;
+    }
+    if (action === 'grow') {
+      this.adjustStadiumScale(1.12);
+      this.pulseHaptics(0.3, 35);
+      return true;
+    }
+    if (action === 'resume') {
+      if (this.callbacks.onResumeRequested) {
+        this.callbacks.onResumeRequested();
+      } else {
+        this.callbacks.onStartRequested?.();
+      }
+      this.pulseHaptics(0.4, 45);
+      return true;
+    }
+    return false;
+  }
+
+  private setupDesktopBorderClicks(): void {
+    const dom = this.renderer.domElement;
+
+    dom.addEventListener('pointerdown', (e) => {
+      this.desktopPointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+
+    dom.addEventListener('pointermove', (e) => {
+      if (this.mode !== 'desktop' || (!this.borderMenuVisible && !this.placementMode)) {
+        if (dom.style.cursor === 'pointer') {
+          dom.style.cursor = '';
+        }
+        return;
+      }
+      const rect = dom.getBoundingClientRect();
+      this.pointerNdc.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+      const hits = this.raycaster.intersectObjects(this.stadium.borderInteractables, false);
+      dom.style.cursor = hits.length > 0 ? 'pointer' : '';
+    });
+
+    dom.addEventListener('click', (e) => {
+      if (this.mode !== 'desktop' || (!this.borderMenuVisible && !this.placementMode)) return;
+      const moveDist = Math.hypot(
+        e.clientX - this.desktopPointerDownPos.x,
+        e.clientY - this.desktopPointerDownPos.y
+      );
+      if (moveDist > 6) return;
+
+      const rect = dom.getBoundingClientRect();
+      this.pointerNdc.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+      const hits = this.raycaster.intersectObjects(this.stadium.borderInteractables, false);
+      if (hits.length > 0) {
+        this.applyBorderAction(hits[0].object.userData?.borderAction);
+      }
+    });
   }
 
   public async startSession(kind: 'ar' | 'vr'): Promise<void> {
@@ -356,19 +448,29 @@ export class XRAndInputManager {
   }
 
   private handleXRPlacementAndGrab(dt: number, frame?: XRFrame): void {
+    this.suppressGameplayThisFrame = false;
+
     const rightSlot = this.findController('right') ?? this.controllers[0];
     const leftSlot = this.findController('left') ?? this.controllers[1];
 
-    // Toggle placement mode with Y button (left controller index 5)
+    // Toggle Pause Menu with Left Start / Menu button (6 or 2) or Y (5)
     const leftGp = leftSlot?.inputSource?.gamepad;
-    const yPressed = Boolean(leftGp?.buttons[5]?.pressed);
-    if (yPressed && !this.prevYPressed) {
-      this.setPlacementMode(!this.placementMode);
+    const menuPressed = Boolean(
+      leftGp?.buttons[6]?.pressed || leftGp?.buttons[2]?.pressed || leftGp?.buttons[5]?.pressed
+    );
+    if (menuPressed && !this.prevMenuPressed) {
+      if (this.placementMode) {
+        this.setPlacementMode(false);
+      } else {
+        this.callbacks.onPauseToggleRequested?.();
+      }
+      this.suppressGameplayThisFrame = true;
     }
-    this.prevYPressed = yPressed;
+    this.prevMenuPressed = menuPressed;
 
-    // Show ray lines only during placement mode or when squeezing
-    const showRay = this.placementMode || this.activeGrabSlot !== null;
+    // Show ray lines during placement mode, Start/Pause border menu, or when squeezing
+    const showRay =
+      this.placementMode || this.borderMenuVisible || this.activeGrabSlot !== null;
     for (const c of this.controllers) {
       c.rayLine.visible = showRay;
     }
@@ -389,12 +491,7 @@ export class XRAndInputManager {
         const rx = Math.abs(rightGp.axes[2]) > 0.15 ? rightGp.axes[2] : 0;
         const ry = Math.abs(rightGp.axes[3]) > 0.15 ? rightGp.axes[3] : 0;
         if (ry !== 0) {
-          const nextScale = THREE.MathUtils.clamp(
-            this.stadium.dioramaRoot.scale.x * (1 - ry * dt * 0.9),
-            MIN_DIORAMA_SCALE,
-            MAX_DIORAMA_SCALE
-          );
-          this.stadium.dioramaRoot.scale.setScalar(nextScale);
+          this.adjustStadiumScale(1 - ry * dt * 0.9);
         }
         if (rx !== 0) {
           this.stadium.dioramaRoot.rotation.y -= rx * dt * 1.6;
@@ -402,6 +499,28 @@ export class XRAndInputManager {
       }
       return;
     }
+
+    const rightGp = rightSlot?.inputSource?.gamepad;
+
+    // Interactive Stadium Border click when Start/Pause/Halftime menu is visible (not repositioning table)
+    if (!this.placementMode && this.borderMenuVisible && rightSlot) {
+      const borderClickNow = Boolean(
+        rightGp?.buttons[4]?.pressed || rightGp?.buttons[0]?.pressed || rightSlot.selecting
+      );
+      if (borderClickNow && !this.prevBorderClick) {
+        this.tempMatrix.identity().extractRotation(rightSlot.ray.matrixWorld);
+        this.raycaster.ray.origin.setFromMatrixPosition(rightSlot.ray.matrixWorld);
+        this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix);
+        const hits = this.raycaster.intersectObjects(this.stadium.borderInteractables, false);
+        if (hits.length > 0 && this.applyBorderAction(hits[0].object.userData?.borderAction)) {
+          this.suppressGameplayThisFrame = true;
+        }
+      }
+      this.prevBorderClick = borderClickNow;
+      this.reticle.visible = false;
+      return;
+    }
+    this.prevBorderClick = false;
 
     if (!this.placementMode) {
       this.reticle.visible = false;
@@ -466,8 +585,7 @@ export class XRAndInputManager {
       }
     }
 
-    // Allow manual height, rotation, and scale adjustment with right thumbstick during placement
-    const rightGp = rightSlot?.inputSource?.gamepad;
+    // Allow manual height and rotation adjustment with right thumbstick during placement
     if (rightGp && rightGp.axes.length >= 4) {
       const rx = Math.abs(rightGp.axes[2]) > 0.15 ? rightGp.axes[2] : 0;
       const ry = Math.abs(rightGp.axes[3]) > 0.15 ? rightGp.axes[3] : 0;
@@ -483,14 +601,35 @@ export class XRAndInputManager {
     const triggerDown = Boolean(rightSlot?.selecting || rightGp?.buttons[0]?.pressed);
     if (triggerDown && !this.prevTriggerPlace) {
       this.setPlacementMode(false);
-      this.waitForKickRelease = true;
+      this.suppressGameplayThisFrame = true;
       this.pulseHaptics(0.45, 50);
     }
     this.prevTriggerPlace = triggerDown;
   }
 
   private readXRGameplayInput(): MatchInputState {
-    if (this.placementMode || this.activeGrabSlot) {
+    const leftSlot = this.findController('left');
+    const rightSlot = this.findController('right');
+    const leftGp = leftSlot?.inputSource?.gamepad;
+    const rightGp = rightSlot?.inputSource?.gamepad;
+
+    const passNow = Boolean(rightGp?.buttons[4]?.pressed);
+    const rawKickHeld = Boolean(rightGp?.buttons[5]?.pressed);
+    const tackleNow = Boolean(leftGp?.buttons[4]?.pressed);
+    const switchNow = Boolean(leftGp?.buttons[0]?.pressed || leftSlot?.selecting);
+
+    if (
+      this.placementMode ||
+      this.borderMenuVisible ||
+      this.activeGrabSlot ||
+      this.suppressGameplayThisFrame
+    ) {
+      this.prevPassPressed = passNow;
+      this.prevTacklePressed = tackleNow;
+      this.prevSwitchPressed = switchNow;
+      if (rawKickHeld) {
+        this.waitForKickRelease = true;
+      }
       return {
         moveX: 0,
         moveZ: 0,
@@ -501,11 +640,6 @@ export class XRAndInputManager {
         switchPressed: false,
       };
     }
-
-    const leftSlot = this.findController('left');
-    const rightSlot = this.findController('right');
-    const leftGp = leftSlot?.inputSource?.gamepad;
-    const rightGp = rightSlot?.inputSource?.gamepad;
 
     // Left thumbstick (Quest Touch Plus maps thumbstick to axes[2], axes[3])
     let rawX = 0;
@@ -525,30 +659,26 @@ export class XRAndInputManager {
 
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
 
-    // Shoot: Right Trigger (0)
-    const rawKickHeld = Boolean(rightGp?.buttons[0]?.pressed || rightSlot?.selecting);
+    // Roubar a bola / Tocar: A Button on Right Controller (4)
+    const passPressed = passNow && !this.prevPassPressed;
+    this.prevPassPressed = passNow;
+
+    // Chute no Gol: B Button on Right Controller (5)
     if (this.waitForKickRelease && !rawKickHeld) {
       this.waitForKickRelease = false;
     }
     const kickHeld = this.waitForKickRelease ? false : rawKickHeld;
 
-    // Dedicated Pass: A Button on Right Controller (4)
-    const passNow = Boolean(rightGp?.buttons[4]?.pressed);
-    const passPressed = passNow && !this.prevPassPressed;
-    this.prevPassPressed = passNow;
+    // Correr (Sprint): Right Trigger (0)
+    const sprint = Boolean(rightGp?.buttons[0]?.pressed || rightSlot?.selecting);
 
-    // Defensive Slide Tackle / Lunge: B Button on Right Controller (5)
-    const tackleNow = Boolean(rightGp?.buttons[5]?.pressed);
-    const tacklePressed = tackleNow && !this.prevTacklePressed;
-    this.prevTacklePressed = tackleNow;
-
-    // Sprint: Left Trigger (0) or Left Stick Click (3)
-    const sprint = Boolean(leftGp?.buttons[0]?.pressed || leftGp?.buttons[3]?.pressed);
-
-    // Switch player: X Button on Left Controller (4)
-    const switchNow = Boolean(leftGp?.buttons[4]?.pressed);
+    // Trocar de jogador: Left Trigger (0)
     const switchPressed = switchNow && !this.prevSwitchPressed;
     this.prevSwitchPressed = switchNow;
+
+    // Carrinho: X Button on Left Controller (4)
+    const tacklePressed = tackleNow && !this.prevTacklePressed;
+    this.prevTacklePressed = tackleNow;
 
     return { moveX, moveZ, sprint, kickHeld, passPressed, tacklePressed, switchPressed };
   }
@@ -587,42 +717,11 @@ export class XRAndInputManager {
   }
 
   /**
-   * Moss-style camera-relative movement:
-   * Maps stick (rawX right/left, rawY down/up) relative to the viewer's current heading
-   * projected onto the stadium's local horizontal XZ plane.
+   * Fixed stadium-space movement (independent of head/camera orientation).
    */
   private projectStickToFieldSpace(rawX: number, rawY: number): { moveX: number; moveZ: number } {
     if (rawX === 0 && rawY === 0) return { moveX: 0, moveZ: 0 };
-
-    const activeCam =
-      this.mode !== 'desktop' && this.renderer.xr.isPresenting
-        ? this.renderer.xr.getCamera()
-        : this.camera;
-
-    // Camera forward in world space (-Z of camera)
-    activeCam.getWorldQuaternion(this.tempQuat);
-    const worldForward = this.tempVecA.set(0, 0, -1).applyQuaternion(this.tempQuat);
-
-    // Transform forward into fieldRoot's local coordinate system
-    this.stadium.fieldRoot.updateMatrixWorld();
-    const invFieldQuat = this.tempQuat.copy(this.stadium.fieldRoot.getWorldQuaternion(new THREE.Quaternion())).invert();
-    const localForward = worldForward.applyQuaternion(invFieldQuat);
-    localForward.y = 0;
-    if (localForward.lengthSq() < 1e-5) {
-      localForward.set(0, 0, -1);
-    } else {
-      localForward.normalize();
-    }
-
-    // Local right = forward x up (0, 1, 0)
-    const localRight = this.tempVecB.set(-localForward.z, 0, localForward.x).normalize();
-
-    // rawY < 0 means pushing stick forward/up
-    const forwardAmount = -rawY;
-    const moveX = localForward.x * forwardAmount + localRight.x * rawX;
-    const moveZ = localForward.z * forwardAmount + localRight.z * rawX;
-
-    return { moveX, moveZ };
+    return { moveX: rawX, moveZ: rawY };
   }
 
   private findController(hand: 'left' | 'right'): ControllerSlot | undefined {

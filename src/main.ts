@@ -10,6 +10,8 @@ const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
 const btnAr = document.getElementById('btn-ar') as HTMLButtonElement;
 const btnVr = document.getElementById('btn-vr') as HTMLButtonElement;
 const btnReposition = document.getElementById('btn-reposition') as HTMLButtonElement;
+const btnScaleDown = document.getElementById('btn-scale-down') as HTMLButtonElement;
+const btnScaleUp = document.getElementById('btn-scale-up') as HTMLButtonElement;
 const btnReset = document.getElementById('btn-reset') as HTMLButtonElement;
 const xrStatusEl = document.getElementById('xr-status') as HTMLParagraphElement;
 const scoreBlueEl = document.getElementById('score-blue') as HTMLElement;
@@ -79,18 +81,33 @@ scene.add(stadium.dioramaRoot);
 
 let goalBannerTimeout: number | undefined;
 let match!: MatchSimulation;
+let xrInput!: XRAndInputManager;
 
 function syncMatchUI(): void {
   if (!match) return;
-  btnStart.textContent = match.matchStarted ? 'Novo Jogo' : 'Iniciar Jogo';
-  btnPause.disabled = !match.matchStarted;
+  btnStart.textContent = match.waitingSecondHalf
+    ? 'Iniciar 2º Tempo'
+    : match.matchStarted
+      ? 'Novo Jogo'
+      : 'Iniciar Jogo';
+  btnPause.disabled = !match.matchStarted || match.matchEnded || match.waitingSecondHalf;
   btnPause.textContent = match.paused ? 'Continuar Jogo' : 'Pausar Jogo';
   btnPause.classList.toggle('is-paused', match.paused);
+
+  const showBorderMenu =
+    !match.matchStarted || match.paused || match.waitingSecondHalf || match.matchEnded;
+  xrInput?.setBorderMenuVisible(showBorderMenu);
 
   if (match.paused) {
     goalBannerEl.textContent = 'JOGO PAUSADO';
     goalBannerEl.classList.remove('hidden');
-  } else if (goalBannerEl.textContent === 'JOGO PAUSADO') {
+  } else if (match.waitingSecondHalf) {
+    goalBannerEl.textContent = 'INTERVALO — LADOS TROCADOS';
+    goalBannerEl.classList.remove('hidden');
+  } else if (
+    goalBannerEl.textContent === 'JOGO PAUSADO' ||
+    goalBannerEl.textContent === 'INTERVALO — LADOS TROCADOS'
+  ) {
     goalBannerEl.classList.add('hidden');
   }
 }
@@ -117,10 +134,9 @@ match = new MatchSimulation(stadium.fieldRoot, {
     xrInput.pulseHaptics(0.25 + power * 0.45, 45);
   },
 });
-syncMatchUI();
 
 // 4. XR & Desktop Input Manager
-const xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
+xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
   onModeChange: (mode) => {
     vrFloorGroup.visible = mode !== 'ar';
     if (mode === 'desktop') {
@@ -131,7 +147,23 @@ const xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
     btnReposition.textContent = placing ? 'Confirmar Posição (Gatilho)' : 'Reposicionar Estádio';
   },
   onStartRequested: () => {
-    match.startMatch();
+    if (match.waitingSecondHalf) {
+      match.startSecondHalf();
+    } else {
+      match.startMatch();
+    }
+    syncMatchUI();
+  },
+  onResumeRequested: () => {
+    if (match.paused) {
+      match.togglePause();
+    } else if (match.waitingSecondHalf) {
+      match.startSecondHalf();
+    } else if (!match.matchStarted || match.matchEnded) {
+      match.startMatch();
+    } else if (xrInput.placementMode) {
+      xrInput.setPlacementMode(false);
+    }
     syncMatchUI();
   },
   onPauseToggleRequested: () => {
@@ -142,10 +174,15 @@ const xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
     match.resetMatch();
     syncMatchUI();
   },
+  onScaleChange: (scale) => {
+    const pct = Math.round(scale * 100);
+    xrStatusEl.textContent = `Tamanho do estádio: ${pct}%`;
+  },
   onStatusMessage: (msg) => {
     xrStatusEl.textContent = msg;
   },
 });
+syncMatchUI();
 
 // 5. Check WebXR Support
 async function initWebXRButtons(): Promise<void> {
@@ -180,7 +217,11 @@ async function initWebXRButtons(): Promise<void> {
 void initWebXRButtons();
 
 btnStart.addEventListener('click', () => {
-  match.startMatch();
+  if (match.waitingSecondHalf) {
+    match.startSecondHalf();
+  } else {
+    match.startMatch();
+  }
   syncMatchUI();
   btnStart.blur();
 });
@@ -200,6 +241,14 @@ btnVr.addEventListener('click', () => {
 btnReposition.addEventListener('click', () => {
   xrInput.setPlacementMode(!xrInput.placementMode);
   btnReposition.blur();
+});
+btnScaleDown.addEventListener('click', () => {
+  xrInput.adjustStadiumScale(0.88);
+  btnScaleDown.blur();
+});
+btnScaleUp.addEventListener('click', () => {
+  xrInput.adjustStadiumScale(1.12);
+  btnScaleUp.blur();
 });
 btnReset.addEventListener('click', () => {
   match.resetMatch();
