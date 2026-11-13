@@ -774,7 +774,7 @@ export class MatchSimulation {
     }
 
     const mate = this.findPassTarget(p, dirX, dirZ, hasInput);
-    let speed = 1.20;
+    let speed = 0.56;
 
     if (mate) {
       const dRaw = Math.hypot(mate.pos.x - this.ballPos.x, mate.pos.z - this.ballPos.z);
@@ -786,7 +786,7 @@ export class MatchSimulation {
       const d = Math.hypot(dx, dz) || 1;
       dirX = dx / d;
       dirZ = dz / d;
-      speed = THREE.MathUtils.clamp(0.94 + d * 0.95, 0.98, 1.68);
+      speed = THREE.MathUtils.clamp(0.44 + d * 0.44, 0.46, 0.80);
 
       const mateIdx = this.players.indexOf(mate);
       if (mateIdx !== -1) {
@@ -798,11 +798,11 @@ export class MatchSimulation {
     const launchDist = PLAYER_RADIUS + BALL_RADIUS + 0.003;
     this.ballPos.x = p.pos.x + dirX * launchDist;
     this.ballPos.z = p.pos.z + dirZ * launchDist;
-    this.ballVel.set(dirX * speed, 0.05, dirZ * speed);
+    this.ballVel.set(dirX * speed, 0.02, dirZ * speed);
     p.facingAngle = Math.atan2(-dirZ, dirX);
     p.kickCooldown = 0.30;
     p.kickAnim = 1;
-    this.ballFreeTimer = 0.18;
+    this.ballFreeTimer = 0.14;
     this.callbacks.onKick?.(0.55);
   }
 
