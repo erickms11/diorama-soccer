@@ -16,6 +16,7 @@ export interface XRStatusCallbacks {
   onPlacementChange?: (isPlacing: boolean) => void;
   onStartRequested?: () => void;
   onResumeRequested?: () => void;
+  onPauseRequested?: () => void;
   onPauseToggleRequested?: () => void;
   onResetRequested?: () => void;
   onScaleChange?: (scale: number) => void;
@@ -48,16 +49,11 @@ export class XRAndInputManager {
 
   private readonly orbitControls: OrbitControls;
   private readonly controllers: ControllerSlot[] = [];
-  private readonly reticle: THREE.Mesh;
-
-  private hitTestSource: XRHitTestSource | null = null;
-  private hitTestRequested = false;
 
   // Grab / drag state
   private activeGrabSlot: ControllerSlot | null = null;
   private grabOffset = new THREE.Vector3();
-  private grabStartYaw = 0;
-  private grabStartControllerYaw = 0;
+  private grabDistance = 0.85;
 
   public borderMenuVisible = false;
 
@@ -66,7 +62,6 @@ export class XRAndInputManager {
   private prevPassPressed = false;
   private prevTacklePressed = false;
   private prevMenuPressed = false;
-  private prevTriggerPlace = false;
   private prevBorderClick = false;
   private waitForKickRelease = false;
   private suppressGameplayThisFrame = false;
@@ -82,10 +77,7 @@ export class XRAndInputManager {
   // Scratch math objects
   private readonly tempMatrix = new THREE.Matrix4();
   private readonly tempVecA = new THREE.Vector3();
-  private readonly tempVecB = new THREE.Vector3();
-  private readonly tempQuat = new THREE.Quaternion();
   private readonly raycaster = new THREE.Raycaster();
-  private readonly fallbackPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -DEFAULT_DIORAMA_POS.y);
 
   constructor(
     renderer: THREE.WebGLRenderer,
@@ -109,15 +101,6 @@ export class XRAndInputManager {
     );
     this.orbitControls.update();
 
-    // Surface placement reticle
-    this.reticle = new THREE.Mesh(
-      new THREE.RingGeometry(0.06, 0.085, 32).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0x34d399, side: THREE.DoubleSide })
-    );
-    this.reticle.matrixAutoUpdate = false;
-    this.reticle.visible = false;
-    this.scene.add(this.reticle);
-
     this.setupControllers();
     this.setupKeyboard();
     this.setupDesktopBorderClicks();
@@ -126,7 +109,6 @@ export class XRAndInputManager {
   public setPlacementMode(active: boolean): void {
     this.placementMode = active;
     this.stadium.setPlacementMode(this.placementMode || this.borderMenuVisible);
-    this.reticle.visible = active && this.mode === 'ar';
     this.callbacks.onPlacementChange?.(active);
   }
 
@@ -225,30 +207,16 @@ export class XRAndInputManager {
     }
 
     const sessionType: XRSessionMode = kind === 'ar' ? 'immersive-ar' : 'immersive-vr';
-    const sessionInit: XRSessionInit =
-      kind === 'ar'
-        ? {
-            optionalFeatures: [
-              'local-floor',
-              'bounded-floor',
-              'hit-test',
-              'hand-tracking',
-              'anchors',
-            ],
-          }
-        : {
-            optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
-          };
+    const sessionInit: XRSessionInit = {
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
+    };
 
     let session: XRSession | null = null;
     try {
       session = await navigator.xr.requestSession(sessionType, sessionInit);
-      this.hitTestRequested = false;
-      this.hitTestSource = null;
+      const activeSession = session;
 
-      session.addEventListener('end', () => {
-        this.hitTestRequested = false;
-        this.hitTestSource = null;
+      activeSession.addEventListener('end', () => {
         this.activeGrabSlot = null;
         this.mode = 'desktop';
         this.setPlacementMode(false);
@@ -258,9 +226,15 @@ export class XRAndInputManager {
         this.callbacks.onModeChange?.('desktop');
       });
 
+      activeSession.addEventListener('visibilitychange', () => {
+        if (activeSession.visibilityState === 'visible-blurred') {
+          this.callbacks.onPauseRequested?.();
+        }
+      });
+
       let tableY = DEFAULT_DIORAMA_POS.y;
       try {
-        await session.requestReferenceSpace('local-floor');
+        await activeSession.requestReferenceSpace('local-floor');
         this.renderer.xr.setReferenceSpaceType('local-floor');
       } catch {
         this.renderer.xr.setReferenceSpaceType('local');
@@ -271,31 +245,31 @@ export class XRAndInputManager {
       this.orbitControls.enabled = false;
       this.callbacks.onModeChange?.(kind);
 
+      this.stadium.dioramaRoot.position.set(
+        DEFAULT_DIORAMA_POS.x,
+        tableY,
+        DEFAULT_DIORAMA_POS.z
+      );
+      this.stadium.dioramaRoot.rotation.set(0, 0, 0);
+      this.stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
+      this.setPlacementMode(false);
+
       if (kind === 'ar') {
         // Set transparent clear alpha BEFORE setSession so XRWebGLLayer composites Passthrough cleanly
         this.scene.background = null;
         this.renderer.setClearColor(0x000000, 0);
-        this.stadium.dioramaRoot.position.y = tableY;
-        this.stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
-        this.setPlacementMode(true);
         this.callbacks.onStatusMessage?.(
-          'Passthrough ativo! Aponte na mesa e aperte o Gatilho Direito para posicionar.'
+          'Passthrough ativo! Clique e arraste o estádio onde quiser e aperte Iniciar.'
         );
       } else {
         this.renderer.setClearColor(0x0f172a, 1);
         this.scene.background = new THREE.Color(0x0f172a);
-        this.stadium.dioramaRoot.position.set(
-          DEFAULT_DIORAMA_POS.x,
-          tableY,
-          DEFAULT_DIORAMA_POS.z
+        this.callbacks.onStatusMessage?.(
+          'Modo VR ativo! Clique e arraste o estádio onde quiser e aperte Iniciar.'
         );
-        this.stadium.dioramaRoot.rotation.set(0, 0, 0);
-        this.stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
-        this.setPlacementMode(false);
-        this.callbacks.onStatusMessage?.('Modo VR ativo! Use os analógicos para jogar.');
       }
 
-      await this.renderer.xr.setSession(session);
+      await this.renderer.xr.setSession(activeSession);
     } catch (err) {
       if (session) {
         await session.end().catch(() => {});
@@ -326,13 +300,13 @@ export class XRAndInputManager {
     return this.camera.getWorldPosition(target);
   }
 
-  public update(dt: number, frame?: XRFrame): MatchInputState {
+  public update(dt: number, _frame?: XRFrame): MatchInputState {
     if (this.mode === 'desktop') {
       this.orbitControls.update();
       return this.readDesktopInput();
     }
 
-    this.handleXRPlacementAndGrab(dt, frame);
+    this.handleXRPlacementAndGrab(dt);
     return this.readXRGameplayInput();
   }
 
@@ -437,26 +411,60 @@ export class XRAndInputManager {
     });
   }
 
-  private beginGrab(slot: ControllerSlot): void {
-    this.activeGrabSlot = slot;
-    slot.grip.getWorldPosition(this.tempVecA);
-    this.grabOffset.copy(this.stadium.dioramaRoot.position).sub(this.tempVecA);
-    this.grabStartYaw = this.stadium.dioramaRoot.rotation.y;
-    slot.grip.getWorldQuaternion(this.tempQuat);
-    const euler = new THREE.Euler().setFromQuaternion(this.tempQuat, 'YXZ');
-    this.grabStartControllerYaw = euler.y;
+  private getControllerRay(slot: ControllerSlot): void {
+    this.tempMatrix.identity().extractRotation(slot.ray.matrixWorld);
+    this.raycaster.ray.origin.setFromMatrixPosition(slot.ray.matrixWorld);
+    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix).normalize();
   }
 
-  private handleXRPlacementAndGrab(dt: number, frame?: XRFrame): void {
+  private getGamepad(hand: 'left' | 'right'): Gamepad | undefined {
+    const slot = this.findController(hand);
+    if (slot?.inputSource?.gamepad) {
+      return slot.inputSource.gamepad;
+    }
+    const session = this.renderer.xr.getSession();
+    if (session) {
+      for (const source of session.inputSources) {
+        if (source.handedness === hand && source.gamepad) {
+          return source.gamepad;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private beginGrab(slot: ControllerSlot, hitDistance?: number): void {
+    this.activeGrabSlot = slot;
+    this.getControllerRay(slot);
+    this.grabDistance =
+      hitDistance !== undefined
+        ? THREE.MathUtils.clamp(hitDistance, 0.25, 3.5)
+        : THREE.MathUtils.clamp(
+            this.raycaster.ray.origin.distanceTo(this.stadium.dioramaRoot.position),
+            0.25,
+            3.5
+          );
+    this.tempVecA
+      .copy(this.raycaster.ray.origin)
+      .addScaledVector(this.raycaster.ray.direction, this.grabDistance);
+    this.grabOffset.copy(this.stadium.dioramaRoot.position).sub(this.tempVecA);
+  }
+
+  private handleXRPlacementAndGrab(dt: number): void {
     this.suppressGameplayThisFrame = false;
 
     const rightSlot = this.findController('right') ?? this.controllers[0];
     const leftSlot = this.findController('left') ?? this.controllers[1];
+    const leftGp = this.getGamepad('left');
+    const rightGp = this.getGamepad('right');
 
-    // Toggle Pause Menu with Left Start / Menu button (6 or 2) or Y (5)
-    const leftGp = leftSlot?.inputSource?.gamepad;
+    // Toggle Pause Menu with Left Menu (2/6/7), Y (5), or Left Stick Click L3 (3)
     const menuPressed = Boolean(
-      leftGp?.buttons[6]?.pressed || leftGp?.buttons[2]?.pressed || leftGp?.buttons[5]?.pressed
+      leftGp?.buttons[6]?.pressed ||
+        leftGp?.buttons[2]?.pressed ||
+        leftGp?.buttons[7]?.pressed ||
+        leftGp?.buttons[5]?.pressed ||
+        leftGp?.buttons[3]?.pressed
     );
     if (menuPressed && !this.prevMenuPressed) {
       if (this.placementMode) {
@@ -468,150 +476,107 @@ export class XRAndInputManager {
     }
     this.prevMenuPressed = menuPressed;
 
-    // Show ray lines during placement mode, Start/Pause border menu, or when squeezing
+    // Show ray lines during placement mode, Start/Pause border menu, or while dragging
     const showRay =
       this.placementMode || this.borderMenuVisible || this.activeGrabSlot !== null;
     for (const c of this.controllers) {
       c.rayLine.visible = showRay;
     }
 
-    // Grab & drag diorama when Grip (squeeze) is held
+    // Grab & drag diorama with Trigger or Grip until released
     if (this.activeGrabSlot) {
-      this.activeGrabSlot.grip.getWorldPosition(this.tempVecA);
-      this.stadium.dioramaRoot.position.copy(this.tempVecA).add(this.grabOffset);
+      const grabGp =
+        this.activeGrabSlot.inputSource?.gamepad ??
+        (this.activeGrabSlot.handedness === 'left' || this.activeGrabSlot.handedness === 'right'
+          ? this.getGamepad(this.activeGrabSlot.handedness)
+          : undefined);
+      const stillHolding = Boolean(
+        this.activeGrabSlot.squeezing ||
+          this.activeGrabSlot.selecting ||
+          grabGp?.buttons[0]?.pressed ||
+          grabGp?.buttons[1]?.pressed
+      );
+      if (!stillHolding) {
+        this.activeGrabSlot = null;
+        this.prevBorderClick = false;
+        return;
+      }
 
-      this.activeGrabSlot.grip.getWorldQuaternion(this.tempQuat);
-      const euler = new THREE.Euler().setFromQuaternion(this.tempQuat, 'YXZ');
-      const deltaYaw = euler.y - this.grabStartControllerYaw;
-      this.stadium.dioramaRoot.rotation.y = this.grabStartYaw + deltaYaw;
-
-      // Right thumbstick scales or fine-rotates while holding grip
-      const rightGp = rightSlot?.inputSource?.gamepad;
-      if (rightGp && rightGp.axes.length >= 4) {
-        const rx = Math.abs(rightGp.axes[2]) > 0.15 ? rightGp.axes[2] : 0;
-        const ry = Math.abs(rightGp.axes[3]) > 0.15 ? rightGp.axes[3] : 0;
+      const stickGp =
+        grabGp && grabGp.axes.length >= 2 ? grabGp : (rightGp ?? leftGp);
+      if (stickGp) {
+        let rx = 0;
+        let ry = 0;
+        if (stickGp.axes.length >= 4) {
+          rx = Math.abs(stickGp.axes[2]) > 0.15 ? stickGp.axes[2] : 0;
+          ry = Math.abs(stickGp.axes[3]) > 0.15 ? stickGp.axes[3] : 0;
+        } else if (stickGp.axes.length >= 2) {
+          rx = Math.abs(stickGp.axes[0]) > 0.15 ? stickGp.axes[0] : 0;
+          ry = Math.abs(stickGp.axes[1]) > 0.15 ? stickGp.axes[1] : 0;
+        }
         if (ry !== 0) {
-          this.adjustStadiumScale(1 - ry * dt * 0.9);
+          this.grabDistance = THREE.MathUtils.clamp(
+            this.grabDistance - ry * dt * 0.85,
+            0.25,
+            3.5
+          );
         }
         if (rx !== 0) {
           this.stadium.dioramaRoot.rotation.y -= rx * dt * 1.6;
         }
       }
+
+      this.getControllerRay(this.activeGrabSlot);
+      this.tempVecA
+        .copy(this.raycaster.ray.origin)
+        .addScaledVector(this.raycaster.ray.direction, this.grabDistance);
+      this.stadium.dioramaRoot.position.copy(this.tempVecA).add(this.grabOffset);
       return;
     }
 
-    const rightGp = rightSlot?.inputSource?.gamepad;
+    // Click border buttons or click directly on stadium to drag when Start/Pause/Placement is visible
+    const rightTriggerNow = Boolean(rightSlot?.selecting || rightGp?.buttons[0]?.pressed);
+    const rightANow = Boolean(rightGp?.buttons[4]?.pressed);
+    const leftTriggerNow = Boolean(leftSlot?.selecting || leftGp?.buttons[0]?.pressed);
+    const borderClickNow = rightTriggerNow || rightANow || leftTriggerNow;
+    const clickTriggerOnly = rightTriggerNow || leftTriggerNow;
+    const clickSlot =
+      leftTriggerNow && !rightTriggerNow && !rightANow ? leftSlot : rightSlot;
 
-    // Interactive Stadium Border click when Start/Pause/Halftime menu is visible (not repositioning table)
-    if (!this.placementMode && this.borderMenuVisible && rightSlot) {
-      const borderClickNow = Boolean(
-        rightGp?.buttons[4]?.pressed || rightGp?.buttons[0]?.pressed || rightSlot.selecting
-      );
+    if ((this.borderMenuVisible || this.placementMode) && clickSlot) {
       if (borderClickNow && !this.prevBorderClick) {
-        this.tempMatrix.identity().extractRotation(rightSlot.ray.matrixWorld);
-        this.raycaster.ray.origin.setFromMatrixPosition(rightSlot.ray.matrixWorld);
-        this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix);
-        const hits = this.raycaster.intersectObjects(this.stadium.borderInteractables, false);
-        if (hits.length > 0 && this.applyBorderAction(hits[0].object.userData?.borderAction)) {
+        this.getControllerRay(clickSlot);
+        const borderHits = this.raycaster.intersectObjects(
+          this.stadium.borderInteractables,
+          false
+        );
+        if (
+          borderHits.length > 0 &&
+          this.applyBorderAction(borderHits[0].object.userData?.borderAction)
+        ) {
           this.suppressGameplayThisFrame = true;
-        }
-      }
-      this.prevBorderClick = borderClickNow;
-      this.reticle.visible = false;
-      return;
-    }
-    this.prevBorderClick = false;
-
-    if (!this.placementMode) {
-      this.reticle.visible = false;
-      return;
-    }
-
-    // Placement Mode: use WebXR hit-test if available, or ray-plane fallback
-    let placedOnHit = false;
-    const session = this.renderer.xr.getSession();
-
-    if (frame && session && this.mode === 'ar') {
-      if (!this.hitTestRequested) {
-        this.hitTestRequested = true;
-        session
-          .requestReferenceSpace('viewer')
-          .then((viewerSpace) => session.requestHitTestSource?.({ space: viewerSpace }))
-          .then((source) => {
-            if (source) this.hitTestSource = source;
-          })
-          .catch(() => {
-            // Hit-test unavailable; fallback plane handles placement smoothly
-          });
-      }
-
-      if (this.hitTestSource) {
-        const refSpace = this.renderer.xr.getReferenceSpace();
-        if (refSpace) {
-          const results = frame.getHitTestResults(this.hitTestSource);
-          if (results.length > 0) {
-            const pose = results[0].getPose(refSpace);
-            if (pose) {
-              this.reticle.visible = true;
-              this.reticle.matrix.fromArray(pose.transform.matrix);
-              this.stadium.dioramaRoot.position.setFromMatrixPosition(this.reticle.matrix);
-              placedOnHit = true;
-            }
+        } else if (clickTriggerOnly) {
+          const stadiumHits = this.raycaster.intersectObject(
+            this.stadium.dioramaRoot,
+            true
+          );
+          if (stadiumHits.length > 0) {
+            this.beginGrab(clickSlot, stadiumHits[0].distance);
+            this.suppressGameplayThisFrame = true;
           }
         }
       }
+      this.prevBorderClick = borderClickNow;
+      return;
     }
-
-    if (!placedOnHit && rightSlot) {
-      // Controller ray intersection against horizontal tabletop plane
-      this.tempMatrix.identity().extractRotation(rightSlot.ray.matrixWorld);
-      this.raycaster.ray.origin.setFromMatrixPosition(rightSlot.ray.matrixWorld);
-      this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.tempMatrix);
-
-      this.fallbackPlane.constant = -this.stadium.dioramaRoot.position.y;
-      if (this.raycaster.ray.intersectPlane(this.fallbackPlane, this.tempVecB)) {
-        // Clamp distance so it doesn't shoot too far away
-        const camPos = this.getCameraWorldPosition(this.tempVecA);
-        if (this.tempVecB.distanceTo(camPos) < 3.5) {
-          this.stadium.dioramaRoot.position.x = this.tempVecB.x;
-          this.stadium.dioramaRoot.position.z = this.tempVecB.z;
-          this.reticle.visible = true;
-          this.reticle.matrix.makeTranslation(
-            this.tempVecB.x,
-            this.stadium.dioramaRoot.position.y,
-            this.tempVecB.z
-          );
-        }
-      }
-    }
-
-    // Allow manual height and rotation adjustment with right thumbstick during placement
-    if (rightGp && rightGp.axes.length >= 4) {
-      const rx = Math.abs(rightGp.axes[2]) > 0.15 ? rightGp.axes[2] : 0;
-      const ry = Math.abs(rightGp.axes[3]) > 0.15 ? rightGp.axes[3] : 0;
-      this.stadium.dioramaRoot.rotation.y -= rx * dt * 1.5;
-      this.stadium.dioramaRoot.position.y = THREE.MathUtils.clamp(
-        this.stadium.dioramaRoot.position.y - ry * dt * 0.45,
-        0.0,
-        1.5
-      );
-    }
-
-    // Confirm placement on Right Trigger press
-    const triggerDown = Boolean(rightSlot?.selecting || rightGp?.buttons[0]?.pressed);
-    if (triggerDown && !this.prevTriggerPlace) {
-      this.setPlacementMode(false);
-      this.suppressGameplayThisFrame = true;
-      this.pulseHaptics(0.45, 50);
-    }
-    this.prevTriggerPlace = triggerDown;
+    this.prevBorderClick = borderClickNow;
   }
 
   private readXRGameplayInput(): MatchInputState {
     const leftSlot = this.findController('left');
     const rightSlot = this.findController('right');
-    const leftGp = leftSlot?.inputSource?.gamepad;
-    const rightGp = rightSlot?.inputSource?.gamepad;
+    const leftGp = this.getGamepad('left');
+    const rightGp = this.getGamepad('right');
 
     const passNow = Boolean(rightGp?.buttons[4]?.pressed);
     const rawKickHeld = Boolean(rightGp?.buttons[5]?.pressed);

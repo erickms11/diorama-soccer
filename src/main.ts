@@ -141,6 +141,14 @@ xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
     vrFloorGroup.visible = mode !== 'ar';
     if (mode === 'desktop') {
       xrStatusEl.textContent = 'Modo Desktop ativo. No Quest 3, use os botões verdes acima.';
+    } else if (
+      match.matchStarted &&
+      !match.paused &&
+      !match.waitingSecondHalf &&
+      !match.matchEnded
+    ) {
+      match.togglePause();
+      syncMatchUI();
     }
   },
   onPlacementChange: (placing) => {
@@ -163,6 +171,12 @@ xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {
       match.startMatch();
     } else if (xrInput.placementMode) {
       xrInput.setPlacementMode(false);
+    }
+    syncMatchUI();
+  },
+  onPauseRequested: () => {
+    if (match.matchStarted && !match.paused && !match.waitingSecondHalf && !match.matchEnded) {
+      match.togglePause();
     }
     syncMatchUI();
   },

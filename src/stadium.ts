@@ -1488,9 +1488,7 @@ export class StadiumDiorama {
         railMat
       );
       rail.position.set(0, railH / 2, zSign * halfD);
-      rail.userData.borderAction = 'shrink';
       group.add(rail);
-      this.borderInteractables.push(rail);
     }
 
     for (const xSign of [-1, 1]) {
@@ -1499,9 +1497,7 @@ export class StadiumDiorama {
         railMat
       );
       rail.position.set(xSign * halfW, railH / 2, 0);
-      rail.userData.borderAction = 'shrink';
       group.add(rail);
-      this.borderInteractables.push(rail);
     }
 
     // Large labeled interactive border bars in front of the stadium (Shrink / Start-Resume / Grow)
