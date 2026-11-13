@@ -212,9 +212,9 @@ export class MatchSimulation {
     if (this.remainingSeconds <= 0) {
       this.matchEnded = true;
       if (this.blueScore > this.redScore) {
-        this.statusText = 'FIM DE JOGO: AZUL VENCEU!';
+        this.statusText = 'FIM DE JOGO: PRETO/BRANCO VENCEU!';
       } else if (this.redScore > this.blueScore) {
-        this.statusText = 'FIM DE JOGO: VERMELHO VENCEU!';
+        this.statusText = 'FIM DE JOGO: VERDE/BRANCO VENCEU!';
       } else {
         this.statusText = 'FIM DE JOGO: EMPATE!';
       }
@@ -323,9 +323,11 @@ export class MatchSimulation {
 
     const jerseyColor =
       team === TEAM_BLUE
-        ? isKeeper ? 0x06b6d4 : 0x2563eb
-        : isKeeper ? 0xf97316 : 0xdc2626;
-    const shortsColor = team === TEAM_BLUE ? 0x1e3a8a : 0x7f1d1d;
+        ? isKeeper ? 0xeab308 : 0xf8fafc
+        : isKeeper ? 0x0284c7 : 0x15803d;
+    const trimColor = team === TEAM_BLUE ? 0x111827 : 0xf8fafc;
+    const shortsColor = team === TEAM_BLUE ? 0x111827 : 0xf8fafc;
+    const visorColor = team === TEAM_BLUE ? 0x111827 : 0x15803d;
 
     // Circular tabletop base disc
     const base = new THREE.Mesh(
@@ -354,6 +356,14 @@ export class MatchSimulation {
     torso.castShadow = true;
     body.add(torso);
 
+    // Chest/collar stripe ring to emphasize two-tone uniform
+    const chestBand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0147, 0.0142, 0.006, 12),
+      new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.5 })
+    );
+    chestBand.position.y = 0.037;
+    body.add(chestBand);
+
     // Head
     const head = new THREE.Mesh(
       new THREE.SphereGeometry(0.0115, 12, 10),
@@ -366,7 +376,7 @@ export class MatchSimulation {
     // Small facing visor/cap detail along +X local axis so orientation is unmistakable
     const visor = new THREE.Mesh(
       new THREE.BoxGeometry(0.007, 0.0045, 0.012),
-      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+      new THREE.MeshStandardMaterial({ color: visorColor, roughness: 0.3 })
     );
     visor.position.set(0.011, 0.057, 0);
     body.add(visor);
@@ -701,10 +711,10 @@ export class MatchSimulation {
         const scoringTeam: 0 | 1 = this.ballPos.x > 0 ? TEAM_BLUE : TEAM_RED;
         if (scoringTeam === TEAM_BLUE) {
           this.blueScore += 1;
-          this.statusText = 'GOL DO TIME AZUL!';
+          this.statusText = 'GOL DO PRETO/BRANCO!';
         } else {
           this.redScore += 1;
-          this.statusText = 'GOL DO TIME VERMELHO!';
+          this.statusText = 'GOL DO VERDE/BRANCO!';
         }
         this.goalResetTimer = 2.6;
         this.callbacks.onGoal?.(scoringTeam);

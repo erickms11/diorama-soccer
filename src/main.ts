@@ -87,7 +87,7 @@ const match = new MatchSimulation(stadium.fieldRoot, {
   onGoal: (team) => {
     stadium.triggerGoalCelebration(2.6);
     xrInput.pulseHaptics(0.9, 180);
-    goalBannerEl.textContent = team === 0 ? 'GOL DO AZUL!' : 'GOL DO VERMELHO!';
+    goalBannerEl.textContent = team === 0 ? 'GOL DO PRETO/BRANCO!' : 'GOL DO VERDE/BRANCO!';
     goalBannerEl.classList.remove('hidden');
     window.clearTimeout(goalBannerTimeout);
     goalBannerTimeout = window.setTimeout(() => {

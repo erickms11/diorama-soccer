@@ -48,8 +48,8 @@ export class StadiumDiorama {
     this.buildPedestal();
     this.buildPitch();
     this.buildBoundaryCushions();
-    this.buildGoal(-HALF_LENGTH, -1, 0x3b82f6); // Blue defends -X
-    this.buildGoal(HALF_LENGTH, 1, 0xef4444);   // Red defends +X
+    this.buildGoal(-HALF_LENGTH, -1, 0x111827); // Black & White defends -X
+    this.buildGoal(HALF_LENGTH, 1, 0x16a34a);   // Green & White defends +X
     this.buildStandsAndCrowd();
     this.buildFloodlights();
 
@@ -115,30 +115,35 @@ export class StadiumDiorama {
     ctx.strokeStyle = statusText ? '#facc15' : '#334155';
     ctx.stroke();
 
-    // Blue badge
-    ctx.fillStyle = '#1d4ed8';
+    // Black & White badge
+    ctx.fillStyle = '#111827';
     this.roundRect(ctx, 24, 28, 175, 86, 14);
     ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#f8fafc';
+    ctx.stroke();
 
-    // Red badge
-    ctx.fillStyle = '#b91c1c';
+    // Green & White badge
+    ctx.fillStyle = '#15803d';
     this.roundRect(ctx, w - 199, 28, 175, 86, 14);
     ctx.fill();
+    ctx.strokeStyle = '#dcfce7';
+    ctx.stroke();
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.fillStyle = '#dbeafe';
-    ctx.font = 'bold 22px system-ui, sans-serif';
-    ctx.fillText('AZUL', 111, 52);
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.fillText('PRETO/BRANCO', 111, 52);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 46px system-ui, sans-serif';
     ctx.fillText(String(blueScore), 111, 88);
 
-    ctx.fillStyle = '#fee2e2';
-    ctx.font = 'bold 22px system-ui, sans-serif';
-    ctx.fillText('VERMELHO', w - 111, 52);
+    ctx.fillStyle = '#dcfce7';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.fillText('VERDE/BRANCO', w - 111, 52);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 46px system-ui, sans-serif';
@@ -460,7 +465,7 @@ export class StadiumDiorama {
       metalness: 0.35,
     });
 
-    const crowdColors = [0x3b82f6, 0xef4444, 0xfacc15, 0xf8fafc, 0x22c55e, 0xf97316];
+    const crowdColors = [0x111827, 0xf8fafc, 0x16a34a, 0xe2e8f0, 0x15803d, 0x334155];
     const fanGeo = new THREE.BoxGeometry(0.011, 0.014, 0.011);
 
     const stepH = 0.021;
