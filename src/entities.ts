@@ -28,6 +28,8 @@ export interface PlayerEntity {
   kickCooldown: number;
   animPhase: number;
   kickAnim: number;
+  diveTimer: number;
+  diveDir: number;
 }
 
 export interface MatchInputState {
@@ -76,6 +78,7 @@ export class MatchSimulation {
   private kickCharge = 0;
   private wasKickHeld = false;
   private autoSwitchCooldown = 0;
+  private ballFreeTimer = 0;
   private goalResetTimer = 0;
   private statusText = '';
   private matchEnded = false;
@@ -173,6 +176,7 @@ export class MatchSimulation {
     this.ballVel.set(0, 0, 0);
     this.kickCharge = 0;
     this.wasKickHeld = false;
+    this.ballFreeTimer = 0;
 
     for (const p of this.players) {
       p.pos.copy(p.homePos);
@@ -180,6 +184,8 @@ export class MatchSimulation {
       p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
       p.kickCooldown = 0;
       p.kickAnim = 0;
+      p.diveTimer = 0;
+      p.diveDir = 0;
       this.syncPlayerMesh(p);
     }
     this.controlledIndex = 3;
@@ -223,6 +229,7 @@ export class MatchSimulation {
     }
 
     // Handle manual player switching or auto-switch when off the ball
+    this.ballFreeTimer = Math.max(0, this.ballFreeTimer - safeDt);
     this.autoSwitchCooldown = Math.max(0, this.autoSwitchCooldown - safeDt);
     if (input.switchPressed) {
       this.switchToClosestBluePlayer();
@@ -259,6 +266,7 @@ export class MatchSimulation {
       const p = this.players[i];
       p.kickCooldown = Math.max(0, p.kickCooldown - safeDt);
       p.kickAnim = Math.max(0, p.kickAnim - safeDt * 4);
+      p.diveTimer = Math.max(0, p.diveTimer - safeDt);
 
       if (i === this.controlledIndex) {
         this.updateHumanPlayer(p, safeDt, input);
@@ -311,22 +319,20 @@ export class MatchSimulation {
           kickCooldown: 0,
           animPhase: i * 1.3,
           kickAnim: 0,
+          diveTimer: 0,
+          diveDir: 0,
         });
       }
     }
   }
 
-  private createPlayerMesh(team: 0 | 1, isKeeper: boolean): { root: THREE.Group; body: THREE.Group } {
+  private createPlayerMesh(team: 0 | 1, _isKeeper: boolean): { root: THREE.Group; body: THREE.Group } {
     const root = new THREE.Group();
     const body = new THREE.Group();
     root.add(body);
 
-    const jerseyColor =
-      team === TEAM_BLUE
-        ? isKeeper ? 0xeab308 : 0xf8fafc
-        : isKeeper ? 0x0284c7 : 0x15803d;
-    const trimColor = team === TEAM_BLUE ? 0x111827 : 0xf8fafc;
-    const shortsColor = team === TEAM_BLUE ? 0x111827 : 0xf8fafc;
+    const jerseyColor = team === TEAM_BLUE ? 0xffffff : 0x15803d;
+    const shortsColor = team === TEAM_BLUE ? 0x111827 : 0xffffff;
     const visorColor = team === TEAM_BLUE ? 0x111827 : 0x15803d;
 
     // Circular tabletop base disc
@@ -338,31 +344,32 @@ export class MatchSimulation {
     base.castShadow = true;
     root.add(base);
 
+    // Legs / socks so black shorts contrast clearly against the base disc
+    const legs = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.009, 0.010, 0.009, 12),
+      new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.65 })
+    );
+    legs.position.y = 0.010;
+    legs.castShadow = true;
+    body.add(legs);
+
     // Shorts / lower torso
     const shorts = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.013, 0.0155, 0.017, 12),
+      new THREE.CylinderGeometry(0.013, 0.0145, 0.013, 12),
       new THREE.MeshStandardMaterial({ color: shortsColor, roughness: 0.6 })
     );
-    shorts.position.y = 0.016;
+    shorts.position.y = 0.020;
     shorts.castShadow = true;
     body.add(shorts);
 
-    // Jersey / upper torso
+    // Solid shirt / upper torso
     const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.0145, 0.013, 0.022, 12),
+      new THREE.CylinderGeometry(0.0145, 0.013, 0.021, 12),
       new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.5 })
     );
-    torso.position.y = 0.035;
+    torso.position.y = 0.037;
     torso.castShadow = true;
     body.add(torso);
-
-    // Chest/collar stripe ring to emphasize two-tone uniform
-    const chestBand = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.0147, 0.0142, 0.006, 12),
-      new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.5 })
-    );
-    chestBand.position.y = 0.037;
-    body.add(chestBand);
 
     // Head
     const head = new THREE.Mesh(
@@ -438,8 +445,9 @@ export class MatchSimulation {
   private performKick(p: PlayerEntity, power: number, aimX = 0, aimZ = 0): void {
     let dirX = Math.cos(p.facingAngle);
     let dirZ = -Math.sin(p.facingAngle);
+    const hasExplicitAim = Math.hypot(aimX, aimZ) > 0.2;
 
-    if (Math.hypot(aimX, aimZ) > 0.2) {
+    if (hasExplicitAim) {
       const len = Math.hypot(aimX, aimZ);
       dirX = aimX / len;
       dirZ = aimZ / len;
@@ -461,13 +469,14 @@ export class MatchSimulation {
       }
     }
 
-    const speed = 0.55 + power * 0.72;
-    this.ballVel.x = dirX * speed + p.vel.x * 0.25;
-    this.ballVel.z = dirZ * speed + p.vel.z * 0.25;
-    this.ballVel.y = 0.12 + power * 0.48;
+    const speed = 0.62 + power * 0.82;
+    this.ballVel.x = dirX * speed + (hasExplicitAim ? 0 : p.vel.x * 0.25);
+    this.ballVel.z = dirZ * speed + (hasExplicitAim ? 0 : p.vel.z * 0.25);
+    this.ballVel.y = 0.08 + power * 0.26;
 
     p.kickCooldown = 0.28;
     p.kickAnim = 1;
+    this.ballFreeTimer = 0.16;
     this.callbacks.onKick?.(power);
   }
 
@@ -480,34 +489,76 @@ export class MatchSimulation {
     const distBall = Math.hypot(this.ballPos.x - p.pos.x, this.ballPos.z - p.pos.z);
 
     if (p.role === 'GK') {
-      // Goalkeeper tracks ball Z inside goal width
-      const clampedZ = THREE.MathUtils.clamp(this.ballPos.z, -GOAL_WIDTH * 0.45, GOAL_WIDTH * 0.45);
-      target.set(ownGoalX + attackDir * 0.045, 0, clampedZ);
-      if (p.team === TEAM_RED) {
-        if (Math.abs(this.ballPos.x - ownGoalX) < 0.16 && Math.abs(this.ballPos.z) < GOAL_WIDTH * 0.7) {
-          target.set(this.ballPos.x, 0, this.ballPos.z);
-        }
-        // Only Red AI goalkeeper clears automatically
-        if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.022 && p.kickCooldown <= 0 && this.ballPos.y < 0.06) {
-          const clearZ = (p.pos.z >= 0 ? 1 : -1) * 0.25;
-          this.performKick(p, 0.75, attackDir, clearZ);
+      // Both goalkeepers anticipate incoming shots, dive laterally, and parry/clear the ball
+      const incomingShot =
+        this.ballVel.x * attackDir < -0.28 && Math.abs(this.ballPos.x - ownGoalX) < 0.52;
+      let clampedZ = THREE.MathUtils.clamp(
+        this.ballPos.z * 0.82,
+        -GOAL_WIDTH * 0.36,
+        GOAL_WIDTH * 0.36
+      );
+
+      if (incomingShot) {
+        const timeToGoal = THREE.MathUtils.clamp(
+          Math.abs(ownGoalX - this.ballPos.x) / Math.max(0.25, Math.abs(this.ballVel.x)),
+          0,
+          0.55
+        );
+        const predictedZ = this.ballPos.z + this.ballVel.z * timeToGoal;
+        clampedZ = THREE.MathUtils.clamp(predictedZ, -GOAL_WIDTH * 0.42, GOAL_WIDTH * 0.42);
+
+        if (p.diveTimer <= 0 && p.kickCooldown <= 0 && Math.abs(this.ballPos.x - ownGoalX) < 0.44) {
+          p.diveTimer = 0.42;
+          p.diveDir = Math.abs(clampedZ - p.pos.z) > 0.02 ? Math.sign(clampedZ - p.pos.z) : 0;
         }
       }
+
+      target.set(ownGoalX + attackDir * 0.035, 0, clampedZ);
+      const saveReach = PLAYER_RADIUS + BALL_RADIUS + (p.diveTimer > 0 ? 0.018 : 0.012);
+      const maxSaveHeight = p.diveTimer > 0 ? GOAL_HEIGHT : 0.075;
+      if (distBall < saveReach && p.kickCooldown <= 0 && this.ballPos.y < maxSaveHeight) {
+        if (p.diveTimer <= 0) {
+          p.diveTimer = 0.32;
+          p.diveDir = Math.abs(this.ballPos.z - p.pos.z) > 0.012 ? Math.sign(this.ballPos.z - p.pos.z) : 0;
+        }
+        const clearZ = (p.pos.z >= 0 ? 1 : -1) * 0.45;
+        this.performKick(p, 0.72, attackDir, clearZ);
+      }
     } else if (isPresser && p.team === TEAM_RED) {
-      // Red AI chases the ball and shoots/passes
-      target.set(this.ballPos.x, 0, this.ballPos.z);
+      // Red AI chases the ball, dribbles toward goal, and finishes inside the danger zone
+      const toGoalX = goalX - this.ballPos.x;
+      const toGoalZ = -this.ballPos.z;
+      const toGoalLen = Math.hypot(toGoalX, toGoalZ) || 1;
+      if (distBall < 0.06) {
+        target.set(
+          this.ballPos.x + (toGoalX / toGoalLen) * 0.08,
+          0,
+          this.ballPos.z + (toGoalZ / toGoalLen) * 0.08
+        );
+      } else {
+        target.set(this.ballPos.x, 0, this.ballPos.z);
+      }
+
       if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.025 && p.kickCooldown <= 0 && this.ballPos.y < 0.05) {
-        const distToGoal = Math.hypot(goalX - p.pos.x, -p.pos.z);
-        if (distToGoal < 0.42) {
-          // Shoot toward opponent goal with slight corner offset
-          const targetZ = p.pos.z > 0 ? -GOAL_WIDTH * 0.25 : GOAL_WIDTH * 0.25;
-          const dx = goalX - p.pos.x;
-          const dz = targetZ - p.pos.z;
+        const distToGoal = Math.hypot(goalX - this.ballPos.x, -this.ballPos.z);
+        if (distToGoal < 0.28 && Math.abs(this.ballPos.x - goalX) < 0.28) {
+          const blueGK = this.players.find((pl) => pl.team === TEAM_BLUE && pl.role === 'GK');
+          const baseCorner = blueGK
+            ? (blueGK.pos.z >= 0 ? -GOAL_WIDTH * 0.22 : GOAL_WIDTH * 0.22)
+            : 0;
+          const targetZ = THREE.MathUtils.clamp(
+            baseCorner + (Math.random() - 0.5) * GOAL_WIDTH * 0.34,
+            -GOAL_WIDTH * 0.35,
+            GOAL_WIDTH * 0.35
+          );
+          const dx = goalX - this.ballPos.x;
+          const dz = targetZ - this.ballPos.z;
           const d = Math.hypot(dx, dz) || 1;
-          this.performKick(p, 0.78, dx / d, dz / d);
-        } else if (Math.random() < 0.04) {
-          // Occasional forward pass
-          this.performKick(p, 0.55, attackDir, (Math.random() - 0.5) * 0.5);
+          this.performKick(p, 0.66 + Math.random() * 0.16, dx / d, dz / d);
+          p.kickCooldown = 0.45;
+        } else if (Math.random() < 0.025) {
+          // Occasional forward pass toward opponent goal
+          this.performKick(p, 0.55, toGoalX / toGoalLen, toGoalZ / toGoalLen);
         }
       }
     } else if (p.team === TEAM_BLUE) {
@@ -546,18 +597,39 @@ export class MatchSimulation {
     const dz = target.z - p.pos.z;
     const dist = Math.hypot(dx, dz);
     const maxSpeed =
-      p.role === 'GK' ? 0.26 : p.team === TEAM_BLUE ? 0.34 : isPresser ? 0.30 : 0.25;
+      p.role === 'GK'
+        ? p.diveTimer > 0
+          ? p.team === TEAM_BLUE
+            ? 0.37
+            : 0.31
+          : p.team === TEAM_BLUE
+            ? 0.25
+            : 0.22
+        : p.team === TEAM_BLUE
+          ? 0.34
+          : isPresser
+            ? 0.30
+            : 0.25;
+    const velLerp = p.role === 'GK' && p.diveTimer > 0 ? Math.min(1, dt * 16) : Math.min(1, dt * 10);
 
     if (dist > 0.015) {
       const stepSpeed = Math.min(maxSpeed, dist * 4.5);
-      p.vel.x = THREE.MathUtils.lerp(p.vel.x, (dx / dist) * stepSpeed, Math.min(1, dt * 10));
-      p.vel.z = THREE.MathUtils.lerp(p.vel.z, (dz / dist) * stepSpeed, Math.min(1, dt * 10));
-      p.facingAngle = Math.atan2(-p.vel.z, p.vel.x);
+      p.vel.x = THREE.MathUtils.lerp(p.vel.x, (dx / dist) * stepSpeed, velLerp);
+      p.vel.z = THREE.MathUtils.lerp(p.vel.z, (dz / dist) * stepSpeed, velLerp);
+      if (p.role === 'GK' && p.diveTimer > 0) {
+        p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
+      } else {
+        p.facingAngle = Math.atan2(-p.vel.z, p.vel.x);
+      }
     } else {
       p.vel.x = THREE.MathUtils.lerp(p.vel.x, 0, Math.min(1, dt * 10));
       p.vel.z = THREE.MathUtils.lerp(p.vel.z, 0, Math.min(1, dt * 10));
-      // Look at the ball when idle
-      p.facingAngle = Math.atan2(-(this.ballPos.z - p.pos.z), this.ballPos.x - p.pos.x);
+      if (p.role === 'GK' && p.diveTimer > 0) {
+        p.facingAngle = p.team === TEAM_BLUE ? 0 : Math.PI;
+      } else {
+        // Look at the ball when idle
+        p.facingAngle = Math.atan2(-(this.ballPos.z - p.pos.z), this.ballPos.x - p.pos.x);
+      }
     }
 
     p.pos.x += p.vel.x * dt;
@@ -597,13 +669,37 @@ export class MatchSimulation {
 
     for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
-      if (p.kickCooldown > 0 || this.ballPos.y > 0.055) continue;
+      if (p.kickCooldown > 0) continue;
 
       const dx = this.ballPos.x - p.pos.x;
       const dz = this.ballPos.z - p.pos.z;
       const dist = Math.hypot(dx, dz);
 
+      if (p.role === 'GK') {
+        const gkReach = contactDist + (p.diveTimer > 0 ? 0.015 : 0.006);
+        const gkMaxHeight = p.diveTimer > 0 ? GOAL_HEIGHT : 0.075;
+        if (dist < gkReach && this.ballPos.y < gkMaxHeight) {
+          if (p.diveTimer <= 0) {
+            p.diveTimer = 0.32;
+            p.diveDir = Math.abs(this.ballPos.z - p.pos.z) > 0.012 ? Math.sign(this.ballPos.z - p.pos.z) : 0;
+          }
+          const attackDir = p.team === TEAM_BLUE ? 1 : -1;
+          const sideSign = this.ballPos.z >= 0 ? 1 : -1;
+          this.ballPos.x = p.pos.x + attackDir * (contactDist + 0.006);
+          this.ballVel.x = attackDir * 0.92;
+          this.ballVel.z = sideSign * 0.42;
+          this.ballVel.y = 0.18;
+          this.ballFreeTimer = 0.20;
+          p.kickCooldown = 0.30;
+          p.kickAnim = 1;
+        }
+        continue;
+      }
+
+      if (this.ballPos.y > 0.055) continue;
+
       if (p.team === TEAM_BLUE) {
+        if (this.ballFreeTimer > 0) continue;
         const isControlled = i === this.controlledIndex;
         const captureRadius = isControlled ? blueCaptureDist : contactDist + 0.01;
         if (dist < captureRadius) {
@@ -618,7 +714,7 @@ export class MatchSimulation {
           this.ballVel.x = p.vel.x;
           this.ballVel.z = p.vel.z;
         }
-      } else if (dist < contactDist) {
+      } else if (p.team === TEAM_RED && dist < contactDist) {
         const nx = dist > 0.0001 ? dx / dist : Math.cos(p.facingAngle);
         const nz = dist > 0.0001 ? dz / dist : -Math.sin(p.facingAngle);
 
@@ -626,20 +722,30 @@ export class MatchSimulation {
         this.ballPos.x = p.pos.x + nx * (contactDist + 0.001);
         this.ballPos.z = p.pos.z + nz * (contactDist + 0.001);
 
-        // If Red tackles while controlled Blue player was holding ball, briefly cooldown Blue magnet
+        // If Red tackles while a Blue player is also in contact (50/50 contest), pop the ball free
         const activeBlue = this.players[this.controlledIndex];
-        if (
+        const blueInContact =
           activeBlue &&
-          Math.hypot(this.ballPos.x - activeBlue.pos.x, this.ballPos.z - activeBlue.pos.z) < blueCaptureDist
-        ) {
-          activeBlue.kickCooldown = 0.22;
-        }
+          Math.hypot(this.ballPos.x - activeBlue.pos.x, this.ballPos.z - activeBlue.pos.z) < blueCaptureDist;
 
-        // Red AI soft dribble forward
-        const dribbleX = Math.cos(p.facingAngle) * 0.12 + p.vel.x * 1.15;
-        const dribbleZ = -Math.sin(p.facingAngle) * 0.12 + p.vel.z * 1.15;
-        this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.72);
-        this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.72);
+        if (blueInContact && activeBlue) {
+          this.ballFreeTimer = 0.18;
+          activeBlue.kickCooldown = 0.25;
+          p.kickCooldown = 0.20;
+          const sideSign = this.ballPos.z >= 0 ? -1 : 1;
+          this.ballVel.x = nx * 0.28;
+          this.ballVel.z = nz * 0.28 + sideSign * 0.18;
+          this.ballVel.y = 0.14;
+        } else {
+          // Red AI dribbles toward Blue goal (-HALF_LENGTH, 0)
+          const gx = -HALF_LENGTH - this.ballPos.x;
+          const gz = -this.ballPos.z;
+          const gd = Math.hypot(gx, gz) || 1;
+          const dribbleX = (gx / gd) * 0.14 + p.vel.x * 1.1;
+          const dribbleZ = (gz / gd) * 0.14 + p.vel.z * 1.1;
+          this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.72);
+          this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.72);
+        }
       }
     }
   }
@@ -706,33 +812,35 @@ export class MatchSimulation {
     const inGoalMouthZ = Math.abs(this.ballPos.z) < halfG - BALL_RADIUS * 0.3;
     const underCrossbar = this.ballPos.y < GOAL_HEIGHT;
 
-    if (Math.abs(this.ballPos.x) > HALF_LENGTH + BALL_RADIUS * 0.4 && inGoalMouthZ && underCrossbar) {
-      if (detectGoals) {
-        const scoringTeam: 0 | 1 = this.ballPos.x > 0 ? TEAM_BLUE : TEAM_RED;
-        if (scoringTeam === TEAM_BLUE) {
-          this.blueScore += 1;
-          this.statusText = 'GOL DO PRETO/BRANCO!';
-        } else {
-          this.redScore += 1;
-          this.statusText = 'GOL DO VERDE/BRANCO!';
+    if (inGoalMouthZ && underCrossbar) {
+      if (Math.abs(this.ballPos.x) > HALF_LENGTH) {
+        if (detectGoals) {
+          const scoringTeam: 0 | 1 = this.ballPos.x > 0 ? TEAM_BLUE : TEAM_RED;
+          if (scoringTeam === TEAM_BLUE) {
+            this.blueScore += 1;
+            this.statusText = 'GOL DO PRETO/BRANCO!';
+          } else {
+            this.redScore += 1;
+            this.statusText = 'GOL DO VERDE/BRANCO!';
+          }
+          this.goalResetTimer = 2.6;
+          this.callbacks.onGoal?.(scoringTeam);
+          this.emitScore();
         }
-        this.goalResetTimer = 2.6;
-        this.callbacks.onGoal?.(scoringTeam);
-        this.emitScore();
-      }
 
-      // Keep ball inside goal net box
-      const maxNetX = HALF_LENGTH + GOAL_DEPTH - BALL_RADIUS;
-      if (this.ballPos.x > maxNetX) {
-        this.ballPos.x = maxNetX;
-        this.ballVel.x *= -0.3;
-      } else if (this.ballPos.x < -maxNetX) {
-        this.ballPos.x = -maxNetX;
-        this.ballVel.x *= -0.3;
-      }
-      if (Math.abs(this.ballPos.z) > halfG - BALL_RADIUS) {
-        this.ballPos.z = Math.sign(this.ballPos.z) * (halfG - BALL_RADIUS);
-        this.ballVel.z *= -0.35;
+        // Keep ball inside goal net box
+        const maxNetX = HALF_LENGTH + GOAL_DEPTH - BALL_RADIUS;
+        if (this.ballPos.x > maxNetX) {
+          this.ballPos.x = maxNetX;
+          this.ballVel.x *= -0.3;
+        } else if (this.ballPos.x < -maxNetX) {
+          this.ballPos.x = -maxNetX;
+          this.ballVel.x *= -0.3;
+        }
+        if (Math.abs(this.ballPos.z) > halfG - BALL_RADIUS) {
+          this.ballPos.z = Math.sign(this.ballPos.z) * (halfG - BALL_RADIUS);
+          this.ballVel.z *= -0.35;
+        }
       }
     } else {
       // Endline cushion outside the goal
@@ -815,9 +923,17 @@ export class MatchSimulation {
     p.mesh.rotation.y = p.facingAngle;
 
     const speed = Math.hypot(p.vel.x, p.vel.z);
-    const bob = speed > 0.02 ? Math.abs(Math.sin(p.animPhase)) * 0.0035 : 0;
-    p.bodyMesh.position.y = bob;
-    p.bodyMesh.rotation.z = p.kickAnim > 0 ? Math.sin(p.kickAnim * Math.PI) * 0.25 : -Math.min(0.15, speed * 0.28);
+    if (p.diveTimer > 0) {
+      const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.42, 0, 1) * Math.PI);
+      p.bodyMesh.position.y = diveArc * 0.024;
+      p.bodyMesh.rotation.x = (p.team === TEAM_BLUE ? 1 : -1) * p.diveDir * diveArc * 0.92;
+      p.bodyMesh.rotation.z = 0;
+    } else {
+      const bob = speed > 0.02 ? Math.abs(Math.sin(p.animPhase)) * 0.0035 : 0;
+      p.bodyMesh.position.y = bob;
+      p.bodyMesh.rotation.x = 0;
+      p.bodyMesh.rotation.z = p.kickAnim > 0 ? Math.sin(p.kickAnim * Math.PI) * 0.25 : -Math.min(0.15, speed * 0.28);
+    }
   }
 
   private syncBallMesh(): void {
