@@ -229,8 +229,7 @@ export class MatchSimulation {
     // Handle human kick charging / release
     this.handleHumanKick(safeDt, input);
 
-    // Update all 10 players
-    const closestBlueAI = this.findClosestOutfieldIndex(TEAM_BLUE, this.controlledIndex);
+    // Update all 10 players (only Red AI presses automatically; Blue AI positions without auto-kicking)
     const closestRedAI = this.findClosestOutfieldIndex(TEAM_RED, -1);
 
     for (let i = 0; i < this.players.length; i++) {
@@ -241,7 +240,7 @@ export class MatchSimulation {
       if (i === this.controlledIndex) {
         this.updateHumanPlayer(p, safeDt, input);
       } else {
-        const isPresser = i === closestBlueAI || i === closestRedAI;
+        const isPresser = i === closestRedAI;
         this.updateAIPlayer(p, safeDt, isPresser);
       }
     }
@@ -448,19 +447,21 @@ export class MatchSimulation {
     const distBall = Math.hypot(this.ballPos.x - p.pos.x, this.ballPos.z - p.pos.z);
 
     if (p.role === 'GK') {
-      // Goalkeeper tracks ball Z inside goal width and rushes if ball is very close
+      // Goalkeeper tracks ball Z inside goal width
       const clampedZ = THREE.MathUtils.clamp(this.ballPos.z, -GOAL_WIDTH * 0.45, GOAL_WIDTH * 0.45);
       target.set(ownGoalX + attackDir * 0.045, 0, clampedZ);
-      if (Math.abs(this.ballPos.x - ownGoalX) < 0.16 && Math.abs(this.ballPos.z) < GOAL_WIDTH * 0.7) {
-        target.set(this.ballPos.x, 0, this.ballPos.z);
+      if (p.team === TEAM_RED) {
+        if (Math.abs(this.ballPos.x - ownGoalX) < 0.16 && Math.abs(this.ballPos.z) < GOAL_WIDTH * 0.7) {
+          target.set(this.ballPos.x, 0, this.ballPos.z);
+        }
+        // Only Red AI goalkeeper clears automatically
+        if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.022 && p.kickCooldown <= 0 && this.ballPos.y < 0.06) {
+          const clearZ = (p.pos.z >= 0 ? 1 : -1) * 0.25;
+          this.performKick(p, 0.75, attackDir, clearZ);
+        }
       }
-      // Clear ball immediately if within kick reach
-      if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.022 && p.kickCooldown <= 0 && this.ballPos.y < 0.06) {
-        const clearZ = (p.pos.z >= 0 ? 1 : -1) * 0.25;
-        this.performKick(p, 0.75, attackDir, clearZ);
-      }
-    } else if (isPresser) {
-      // Chase the ball
+    } else if (isPresser && p.team === TEAM_RED) {
+      // Red AI chases the ball and shoots/passes
       target.set(this.ballPos.x, 0, this.ballPos.z);
       if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.025 && p.kickCooldown <= 0 && this.ballPos.y < 0.05) {
         const distToGoal = Math.hypot(goalX - p.pos.x, -p.pos.z);
@@ -477,7 +478,7 @@ export class MatchSimulation {
         }
       }
     } else {
-      // Shift formation dynamically with ball position
+      // Shift formation dynamically with ball position (Blue teammates move into support without auto-kicking)
       const shiftX = this.ballPos.x * 0.42;
       const shiftZ = this.ballPos.z * 0.28;
       target.x = THREE.MathUtils.clamp(p.homePos.x + shiftX, -HALF_LENGTH + 0.08, HALF_LENGTH - 0.08);
@@ -550,15 +551,19 @@ export class MatchSimulation {
         this.ballPos.x = p.pos.x + nx * (contactDist + 0.001);
         this.ballPos.z = p.pos.z + nz * (contactDist + 0.001);
 
-        // Soft dribble forward in player's facing/movement direction
-        const dribbleX = Math.cos(p.facingAngle) * 0.12 + p.vel.x * 1.18;
-        const dribbleZ = -Math.sin(p.facingAngle) * 0.12 + p.vel.z * 1.18;
-        this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.72);
-        this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.72);
-
-        // Auto-switch to a Blue outfielder who takes possession
-        if (p.team === TEAM_BLUE && p.role !== 'GK' && i !== this.controlledIndex) {
-          this.controlledIndex = i;
+        if (p.team === TEAM_BLUE) {
+          // Hand control to whichever Blue player touches the ball and keep ball at feet without auto-kicking
+          if (i !== this.controlledIndex) {
+            this.controlledIndex = i;
+          }
+          this.ballVel.x = p.vel.x * 1.02;
+          this.ballVel.z = p.vel.z * 1.02;
+        } else {
+          // Red AI soft dribble forward
+          const dribbleX = Math.cos(p.facingAngle) * 0.12 + p.vel.x * 1.15;
+          const dribbleZ = -Math.sin(p.facingAngle) * 0.12 + p.vel.z * 1.15;
+          this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.72);
+          this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.72);
         }
       }
     }

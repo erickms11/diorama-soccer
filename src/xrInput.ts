@@ -58,6 +58,7 @@ export class XRAndInputManager {
   private prevSwitchPressed = false;
   private prevYPressed = false;
   private prevTriggerPlace = false;
+  private waitForKickRelease = false;
 
   // Desktop keyboard state
   private readonly keys = new Set<string>();
@@ -131,14 +132,13 @@ export class XRAndInputManager {
             optionalFeatures: [
               'local-floor',
               'bounded-floor',
-              'layers',
               'hit-test',
               'hand-tracking',
               'anchors',
             ],
           }
         : {
-            optionalFeatures: ['local-floor', 'bounded-floor', 'layers', 'hand-tracking'],
+            optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
           };
 
     let session: XRSession | null = null;
@@ -154,6 +154,7 @@ export class XRAndInputManager {
         this.mode = 'desktop';
         this.setPlacementMode(false);
         this.orbitControls.enabled = true;
+        this.renderer.setClearColor(0x0b1220, 1);
         this.scene.background = new THREE.Color(0x0b1220);
         this.callbacks.onModeChange?.('desktop');
       });
@@ -167,20 +168,21 @@ export class XRAndInputManager {
         tableY = -0.35;
       }
 
-      await this.renderer.xr.setSession(session);
-
       this.mode = kind;
       this.orbitControls.enabled = false;
+      this.callbacks.onModeChange?.(kind);
 
       if (kind === 'ar') {
-        // Transparent background for Meta Quest 3 color Passthrough
+        // Set transparent clear alpha BEFORE setSession so XRWebGLLayer composites Passthrough cleanly
         this.scene.background = null;
+        this.renderer.setClearColor(0x000000, 0);
         this.stadium.dioramaRoot.position.y = tableY;
         this.setPlacementMode(true);
         this.callbacks.onStatusMessage?.(
           'Passthrough ativo! Aponte na mesa e aperte o Gatilho Direito para posicionar.'
         );
       } else {
+        this.renderer.setClearColor(0x0f172a, 1);
         this.scene.background = new THREE.Color(0x0f172a);
         this.stadium.dioramaRoot.position.set(
           DEFAULT_DIORAMA_POS.x,
@@ -193,7 +195,7 @@ export class XRAndInputManager {
         this.callbacks.onStatusMessage?.('Modo VR ativo! Use os analógicos para jogar.');
       }
 
-      this.callbacks.onModeChange?.(kind);
+      await this.renderer.xr.setSession(session);
     } catch (err) {
       if (session) {
         await session.end().catch(() => {});
@@ -461,6 +463,7 @@ export class XRAndInputManager {
     const triggerDown = Boolean(rightSlot?.selecting || rightGp?.buttons[0]?.pressed);
     if (triggerDown && !this.prevTriggerPlace) {
       this.setPlacementMode(false);
+      this.waitForKickRelease = true;
       this.pulseHaptics(0.45, 50);
     }
     this.prevTriggerPlace = triggerDown;
@@ -495,9 +498,13 @@ export class XRAndInputManager {
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
 
     // Kick: Right Trigger (0) or A Button (4)
-    const kickHeld = Boolean(
+    const rawKickHeld = Boolean(
       rightGp?.buttons[0]?.pressed || rightGp?.buttons[4]?.pressed || rightSlot?.selecting
     );
+    if (this.waitForKickRelease && !rawKickHeld) {
+      this.waitForKickRelease = false;
+    }
+    const kickHeld = this.waitForKickRelease ? false : rawKickHeld;
 
     // Sprint: Left Trigger (0) or Left Stick Click (3)
     const sprint = Boolean(leftGp?.buttons[0]?.pressed || leftGp?.buttons[3]?.pressed);
