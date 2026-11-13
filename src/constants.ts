@@ -27,7 +27,8 @@ export const DEFAULT_DIORAMA_POS = {
   z: -0.85,
 };
 
-export const MIN_DIORAMA_SCALE = 0.4;
+export const DEFAULT_DIORAMA_SCALE = 0.6;
+export const MIN_DIORAMA_SCALE = 0.25;
 export const MAX_DIORAMA_SCALE = 2.2;
 
 export const MATCH_DURATION_SECONDS = 180; // 3-minute match

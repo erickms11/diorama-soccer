@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import './style.css';
-import { DEFAULT_DIORAMA_POS } from './constants';
+import { DEFAULT_DIORAMA_POS, DEFAULT_DIORAMA_SCALE } from './constants';
 import { MatchSimulation } from './entities';
 import { StadiumDiorama } from './stadium';
 import { XRAndInputManager } from './xrInput';
@@ -33,7 +33,7 @@ const camera = new THREE.PerspectiveCamera(
   0.02,
   40
 );
-camera.position.set(0, 1.62, 0.48);
+camera.position.set(0, 1.32, 0.12);
 
 // 2. Lighting
 const hemiLight = new THREE.HemisphereLight(0xf8fafc, 0x334155, 1.15);
@@ -57,7 +57,7 @@ const vrFloorGroup = new THREE.Group();
 const gridHelper = new THREE.GridHelper(6, 24, 0x334155, 0x1e293b);
 vrFloorGroup.add(gridHelper);
 const tableSurface = new THREE.Mesh(
-  new THREE.BoxGeometry(2.15, 0.04, 1.65),
+  new THREE.BoxGeometry(1.35, 0.04, 1.05),
   new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.85 })
 );
 tableSurface.position.set(DEFAULT_DIORAMA_POS.x, DEFAULT_DIORAMA_POS.y - 0.02, DEFAULT_DIORAMA_POS.z);
@@ -72,6 +72,7 @@ stadium.dioramaRoot.position.set(
   DEFAULT_DIORAMA_POS.y,
   DEFAULT_DIORAMA_POS.z
 );
+stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
 scene.add(stadium.dioramaRoot);
 
 let goalBannerTimeout: number | undefined;

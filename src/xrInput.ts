@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   DEFAULT_DIORAMA_POS,
+  DEFAULT_DIORAMA_SCALE,
   MAX_DIORAMA_SCALE,
   MIN_DIORAMA_SCALE,
 } from './constants';
@@ -177,6 +178,7 @@ export class XRAndInputManager {
         this.scene.background = null;
         this.renderer.setClearColor(0x000000, 0);
         this.stadium.dioramaRoot.position.y = tableY;
+        this.stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
         this.setPlacementMode(true);
         this.callbacks.onStatusMessage?.(
           'Passthrough ativo! Aponte na mesa e aperte o Gatilho Direito para posicionar.'
@@ -190,7 +192,7 @@ export class XRAndInputManager {
           DEFAULT_DIORAMA_POS.z
         );
         this.stadium.dioramaRoot.rotation.set(0, 0, 0);
-        this.stadium.dioramaRoot.scale.setScalar(1);
+        this.stadium.dioramaRoot.scale.setScalar(DEFAULT_DIORAMA_SCALE);
         this.setPlacementMode(false);
         this.callbacks.onStatusMessage?.('Modo VR ativo! Use os analógicos para jogar.');
       }

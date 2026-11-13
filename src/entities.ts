@@ -75,6 +75,7 @@ export class MatchSimulation {
 
   private kickCharge = 0;
   private wasKickHeld = false;
+  private autoSwitchCooldown = 0;
   private goalResetTimer = 0;
   private statusText = '';
   private matchEnded = false;
@@ -221,9 +222,31 @@ export class MatchSimulation {
       return;
     }
 
-    // Handle manual player switching
+    // Handle manual player switching or auto-switch when off the ball
+    this.autoSwitchCooldown = Math.max(0, this.autoSwitchCooldown - safeDt);
     if (input.switchPressed) {
       this.switchToClosestBluePlayer();
+      this.autoSwitchCooldown = 0.35;
+    } else if (this.autoSwitchCooldown <= 0) {
+      const controlled = this.players[this.controlledIndex];
+      const distControlled = Math.hypot(
+        this.ballPos.x - controlled.pos.x,
+        this.ballPos.z - controlled.pos.z
+      );
+      if (distControlled > PLAYER_RADIUS + BALL_RADIUS + 0.038) {
+        const closestBlue = this.findClosestOutfieldIndex(TEAM_BLUE, -1);
+        if (closestBlue !== -1 && closestBlue !== this.controlledIndex) {
+          const candidate = this.players[closestBlue];
+          const distCandidate = Math.hypot(
+            this.ballPos.x - candidate.pos.x,
+            this.ballPos.z - candidate.pos.z
+          );
+          if (distCandidate < distControlled - 0.035) {
+            this.controlledIndex = closestBlue;
+            this.autoSwitchCooldown = 0.22;
+          }
+        }
+      }
     }
 
     // Handle human kick charging / release
@@ -477,8 +500,32 @@ export class MatchSimulation {
           this.performKick(p, 0.55, attackDir, (Math.random() - 0.5) * 0.5);
         }
       }
+    } else if (p.team === TEAM_BLUE) {
+      // Blue teammates push into attack and offer open pass lanes without auto-kicking
+      if (p.role === 'FWD_L' || p.role === 'FWD_R') {
+        const baseAdv = p.homePos.x + this.ballPos.x * 0.85 + 0.22;
+        const rawX = this.ballPos.x > -0.15 ? Math.max(baseAdv, this.ballPos.x + 0.16) : baseAdv;
+        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.15, HALF_LENGTH - 0.10);
+        target.z = THREE.MathUtils.clamp(
+          p.homePos.z * 0.85 + this.ballPos.z * 0.32,
+          -HALF_WIDTH + 0.06,
+          HALF_WIDTH - 0.06
+        );
+      } else {
+        const pushBonus = this.ballPos.x > 0 ? 0.18 : 0;
+        target.x = THREE.MathUtils.clamp(
+          p.homePos.x + this.ballPos.x * 0.72 + pushBonus,
+          -HALF_LENGTH + 0.12,
+          HALF_LENGTH * 0.35
+        );
+        target.z = THREE.MathUtils.clamp(
+          p.homePos.z + this.ballPos.z * 0.28,
+          -HALF_WIDTH + 0.06,
+          HALF_WIDTH - 0.06
+        );
+      }
     } else {
-      // Shift formation dynamically with ball position (Blue teammates move into support without auto-kicking)
+      // Red AI off-ball tactical shift
       const shiftX = this.ballPos.x * 0.42;
       const shiftZ = this.ballPos.z * 0.28;
       target.x = THREE.MathUtils.clamp(p.homePos.x + shiftX, -HALF_LENGTH + 0.08, HALF_LENGTH - 0.08);
@@ -488,7 +535,8 @@ export class MatchSimulation {
     const dx = target.x - p.pos.x;
     const dz = target.z - p.pos.z;
     const dist = Math.hypot(dx, dz);
-    const maxSpeed = p.role === 'GK' ? 0.26 : isPresser ? 0.30 : 0.25;
+    const maxSpeed =
+      p.role === 'GK' ? 0.26 : p.team === TEAM_BLUE ? 0.34 : isPresser ? 0.30 : 0.25;
 
     if (dist > 0.015) {
       const stepSpeed = Math.min(maxSpeed, dist * 4.5);
@@ -534,6 +582,8 @@ export class MatchSimulation {
 
   private resolveBallPlayerInteractions(): void {
     const contactDist = PLAYER_RADIUS + BALL_RADIUS;
+    const blueCaptureDist = contactDist + 0.024;
+    const leadDist = contactDist + 0.002;
 
     for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i];
@@ -543,7 +593,22 @@ export class MatchSimulation {
       const dz = this.ballPos.z - p.pos.z;
       const dist = Math.hypot(dx, dz);
 
-      if (dist < contactDist) {
+      if (p.team === TEAM_BLUE) {
+        const isControlled = i === this.controlledIndex;
+        const captureRadius = isControlled ? blueCaptureDist : contactDist + 0.01;
+        if (dist < captureRadius) {
+          if (!isControlled) {
+            this.controlledIndex = i;
+          }
+          // Magnetize ball smoothly in front of the player's feet for firm dribbling
+          const targetX = p.pos.x + Math.cos(p.facingAngle) * leadDist;
+          const targetZ = p.pos.z - Math.sin(p.facingAngle) * leadDist;
+          this.ballPos.x = THREE.MathUtils.lerp(this.ballPos.x, targetX, 0.55);
+          this.ballPos.z = THREE.MathUtils.lerp(this.ballPos.z, targetZ, 0.55);
+          this.ballVel.x = p.vel.x;
+          this.ballVel.z = p.vel.z;
+        }
+      } else if (dist < contactDist) {
         const nx = dist > 0.0001 ? dx / dist : Math.cos(p.facingAngle);
         const nz = dist > 0.0001 ? dz / dist : -Math.sin(p.facingAngle);
 
@@ -551,20 +616,20 @@ export class MatchSimulation {
         this.ballPos.x = p.pos.x + nx * (contactDist + 0.001);
         this.ballPos.z = p.pos.z + nz * (contactDist + 0.001);
 
-        if (p.team === TEAM_BLUE) {
-          // Hand control to whichever Blue player touches the ball and keep ball at feet without auto-kicking
-          if (i !== this.controlledIndex) {
-            this.controlledIndex = i;
-          }
-          this.ballVel.x = p.vel.x * 1.02;
-          this.ballVel.z = p.vel.z * 1.02;
-        } else {
-          // Red AI soft dribble forward
-          const dribbleX = Math.cos(p.facingAngle) * 0.12 + p.vel.x * 1.15;
-          const dribbleZ = -Math.sin(p.facingAngle) * 0.12 + p.vel.z * 1.15;
-          this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.72);
-          this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.72);
+        // If Red tackles while controlled Blue player was holding ball, briefly cooldown Blue magnet
+        const activeBlue = this.players[this.controlledIndex];
+        if (
+          activeBlue &&
+          Math.hypot(this.ballPos.x - activeBlue.pos.x, this.ballPos.z - activeBlue.pos.z) < blueCaptureDist
+        ) {
+          activeBlue.kickCooldown = 0.22;
         }
+
+        // Red AI soft dribble forward
+        const dribbleX = Math.cos(p.facingAngle) * 0.12 + p.vel.x * 1.15;
+        const dribbleZ = -Math.sin(p.facingAngle) * 0.12 + p.vel.z * 1.15;
+        this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.72);
+        this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.72);
       }
     }
   }
