@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
   BALL_RADIUS,
   GOAL_DEPTH,
@@ -20,6 +22,7 @@ export interface PlayerEntity {
   id: number;
   team: 0 | 1;
   role: PlayerRole;
+  slotIndex: number;
   mesh: THREE.Group;
   bodyMesh: THREE.Group;
   leftLeg: THREE.Group;
@@ -31,6 +34,18 @@ export interface PlayerEntity {
   leftForearm: THREE.Group;
   rightForearm: THREE.Group;
   headGroup: THREE.Group;
+  glbGroup?: THREE.Group;
+  mixer?: THREE.AnimationMixer;
+  actions?: Record<string, THREE.AnimationAction>;
+  activeActionName?: string;
+  glbBones?: {
+    upperLegR?: THREE.Object3D;
+    lowerLegR?: THREE.Object3D;
+    footR?: THREE.Object3D;
+    torso?: THREE.Object3D;
+    upperArmL?: THREE.Object3D;
+    upperArmR?: THREE.Object3D;
+  };
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   homePos: THREE.Vector3;
@@ -103,6 +118,7 @@ export class MatchSimulation {
   private ballFreeTimer = 0;
   private ballSpinY = 0;
   private goalResetTimer = 0;
+  private lastScorerTeam: 0 | 1 | null = null;
   private statusText = '';
   private kickoffTeam: 0 | 1 = TEAM_BLUE;
   public currentHalf: 1 | 2 = 1;
@@ -240,6 +256,7 @@ export class MatchSimulation {
     this.fieldRoot.add(this.chargeBarBg);
 
     this.spawnTeams();
+    this.loadGlbPlayers();
     this.currentHalf = 1;
     this.waitingSecondHalf = false;
     this.applyHalfSides();
@@ -324,6 +341,7 @@ export class MatchSimulation {
     this.ballFreeTimer = 0;
     this.ballSpinY = 0;
     this.hasSupportSpot = false;
+    this.lastScorerTeam = null;
 
     for (const p of this.players) {
       p.pos.copy(p.homePos);
@@ -357,6 +375,9 @@ export class MatchSimulation {
       if (input.passPressed || input.kickHeld || input.switchPressed) {
         this.startMatch();
       } else {
+        for (const p of this.players) {
+          this.syncPlayerMesh(p, safeDt);
+        }
         this.updateIndicators(elapsedTime, cameraWorldPos);
         return;
       }
@@ -366,6 +387,9 @@ export class MatchSimulation {
       if (input.passPressed || input.kickHeld) {
         this.startSecondHalf();
       } else {
+        for (const p of this.players) {
+          this.syncPlayerMesh(p, safeDt);
+        }
         this.updateIndicators(elapsedTime, cameraWorldPos);
         return;
       }
@@ -385,9 +409,13 @@ export class MatchSimulation {
       this.goalResetTimer -= safeDt;
       this.stepBallStep(safeDt, false);
       this.syncBallMesh();
+      for (const p of this.players) {
+        this.syncPlayerMesh(p, safeDt);
+      }
       this.updateIndicators(elapsedTime, cameraWorldPos);
       if (this.goalResetTimer <= 0) {
         this.statusText = '';
+        this.lastScorerTeam = null;
         this.resetKickoff();
         this.emitScore();
       }
@@ -504,7 +532,7 @@ export class MatchSimulation {
 
     this.syncBallMesh();
     for (const p of this.players) {
-      this.syncPlayerMesh(p);
+      this.syncPlayerMesh(p, safeDt);
     }
     this.updateIndicators(elapsedTime, cameraWorldPos);
     this.emitScore();
@@ -547,6 +575,7 @@ export class MatchSimulation {
           id: id++,
           team,
           role: f.role,
+          slotIndex: i,
           mesh: root,
           bodyMesh: body,
           leftLeg,
@@ -573,6 +602,186 @@ export class MatchSimulation {
         });
       }
     }
+  }
+
+  private getPlayerStyle(team: 0 | 1, isKeeper: boolean, slotIndex: number) {
+    const numbers = ['1', '2', '4', '7', '8', '10', '9', '11'];
+    const numStr = numbers[slotIndex % numbers.length];
+
+    const skinPalette = [0xf5d0b5, 0xe8b896, 0xc68652, 0x8d5524, 0xf1c27d];
+    const hairPalette = [0x1c1917, 0x451a03, 0x0f172a, 0x78350f, 0xd97706];
+    const paletteIdx = (team * 5 + slotIndex) % 5;
+    const skinColor = skinPalette[paletteIdx];
+    const hairColor = hairPalette[(paletteIdx + 2) % 5];
+
+    const jerseyColor = isKeeper
+      ? team === TEAM_BLUE
+        ? 0x0284c7
+        : 0xd97706
+      : team === TEAM_BLUE
+        ? 0xffffff
+        : 0x15803d;
+    const shortsColor = isKeeper
+      ? team === TEAM_BLUE
+        ? 0x111827
+        : 0x064e3b
+      : team === TEAM_BLUE
+        ? 0x111827
+        : 0xffffff;
+    const sockColor = isKeeper ? 0xf8fafc : team === TEAM_BLUE ? 0xf8fafc : 0x166534;
+    const trimColor = isKeeper ? 0xfef08a : team === TEAM_BLUE ? 0x1e293b : 0xffffff;
+    const numTextColor = isKeeper ? '#ffffff' : team === TEAM_BLUE ? '#111827' : '#ffffff';
+    const baseRingColor = team === TEAM_BLUE ? 0xe2e8f0 : 0x22c55e;
+
+    return {
+      numStr,
+      skinColor,
+      hairColor,
+      jerseyColor,
+      shortsColor,
+      sockColor,
+      trimColor,
+      numTextColor,
+      baseRingColor,
+    };
+  }
+
+  private loadGlbPlayers(): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      './models/player.glb',
+      (gltf) => {
+        const tmpColor = new THREE.Color();
+        const badgeGeo = new THREE.PlaneGeometry(0.42, 0.42);
+
+        for (const p of this.players) {
+          const isKeeper = p.role === 'GK';
+          const style = this.getPlayerStyle(p.team, isKeeper, p.slotIndex);
+          const clonedScene = SkeletonUtils.clone(gltf.scene) as THREE.Group;
+
+          const glbGroup = new THREE.Group();
+          const facingWrapper = new THREE.Group();
+          facingWrapper.scale.setScalar(0.028);
+          facingWrapper.rotation.y = Math.PI / 2;
+          facingWrapper.add(clonedScene);
+          glbGroup.add(facingWrapper);
+
+          const bones: NonNullable<PlayerEntity['glbBones']> = {};
+
+          clonedScene.traverse((obj) => {
+            if ((obj as THREE.Bone).isBone) {
+              if (obj.name === 'UpperLeg.R') bones.upperLegR = obj;
+              else if (obj.name === 'LowerLeg.R') bones.lowerLegR = obj;
+              else if (obj.name === 'Foot.R') bones.footR = obj;
+              else if (obj.name === 'Torso') bones.torso = obj;
+              else if (obj.name === 'UpperArm.L') bones.upperArmL = obj;
+              else if (obj.name === 'UpperArm.R') bones.upperArmR = obj;
+              return;
+            }
+
+            if (!(obj instanceof THREE.Mesh)) return;
+            obj.castShadow = true;
+            obj.receiveShadow = true;
+            obj.frustumCulled = false;
+
+            const srcMat = obj.material;
+            if (!srcMat || Array.isArray(srcMat) || !(srcMat instanceof THREE.MeshStandardMaterial)) {
+              return;
+            }
+            const mat = srcMat.clone();
+            mat.metalness = 0.04;
+
+            if (mat.name === 'Shirt') {
+              mat.color.setHex(style.jerseyColor);
+              mat.roughness = 0.5;
+            } else if (mat.name === 'Pants') {
+              mat.color.setHex(style.shortsColor);
+              mat.roughness = 0.6;
+            } else if (mat.name === 'Belt') {
+              mat.color.setHex(style.trimColor);
+              mat.roughness = 0.48;
+            } else if (mat.name === 'Hair') {
+              mat.color.setHex(style.hairColor);
+              mat.roughness = 0.75;
+            } else if (mat.name === 'Skin') {
+              obj.geometry = obj.geometry.clone();
+              const posAttr = obj.geometry.getAttribute('position');
+              if (posAttr) {
+                const count = posAttr.count;
+                const colors = new Float32Array(count * 3);
+                for (let k = 0; k < count; k++) {
+                  const vx = posAttr.getX(k);
+                  const vy = posAttr.getY(k);
+                  let hex = style.skinColor;
+                  if (vy < 0.19) {
+                    hex = 0x111827; // Soccer cleat
+                  } else if (vy < 0.49) {
+                    hex = style.sockColor; // Team sock
+                  } else if (vy < 0.53) {
+                    hex = style.trimColor; // Sock top band
+                  } else if (isKeeper && vy < 2.15 && Math.abs(vx) > 1.24) {
+                    hex = 0xfef08a; // Goalkeeper gloves
+                  } else if (isKeeper && vy < 2.15 && Math.abs(vx) > 0.52) {
+                    hex = style.jerseyColor; // Goalkeeper long sleeves
+                  }
+                  tmpColor.setHex(hex);
+                  colors[k * 3] = tmpColor.r;
+                  colors[k * 3 + 1] = tmpColor.g;
+                  colors[k * 3 + 2] = tmpColor.b;
+                }
+                obj.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+              }
+              mat.vertexColors = true;
+              mat.color.setHex(0xffffff);
+              mat.roughness = 0.65;
+            }
+
+            obj.material = mat;
+          });
+
+          if (bones.torso) {
+            const numBadge = new THREE.Mesh(
+              badgeGeo,
+              new THREE.MeshBasicMaterial({
+                map: this.createNumberBadgeTexture(style.numStr, style.numTextColor),
+                transparent: true,
+                depthWrite: false,
+                polygonOffset: true,
+                polygonOffsetFactor: -1,
+              })
+            );
+            numBadge.position.set(0, 0.24, -0.22);
+            numBadge.rotation.y = Math.PI;
+            bones.torso.add(numBadge);
+          }
+
+          const mixer = new THREE.AnimationMixer(clonedScene);
+          const actions: Record<string, THREE.AnimationAction> = {};
+          for (const clip of gltf.animations) {
+            actions[clip.name] = mixer.clipAction(clip);
+          }
+
+          const idleAction = actions.Idle;
+          if (idleAction) {
+            idleAction.reset().play();
+            mixer.update(p.slotIndex * 0.25);
+          }
+
+          p.glbGroup = glbGroup;
+          p.mixer = mixer;
+          p.actions = actions;
+          p.activeActionName = 'Idle';
+          p.glbBones = bones;
+
+          p.mesh.add(glbGroup);
+          p.bodyMesh.visible = false;
+        }
+      },
+      undefined,
+      (err) => {
+        console.warn('[GLB] Falha ao carregar ./models/player.glb, mantendo boneco procedural.', err);
+      }
+    );
   }
 
   private createNumberBadgeTexture(numStr: string, textColor: string): THREE.CanvasTexture {
@@ -613,33 +822,17 @@ export class MatchSimulation {
     body.scale.set(1.0, 1.18, 1.0);
     root.add(body);
 
-    const numbers = ['1', '2', '4', '7', '8', '10', '9', '11'];
-    const numStr = numbers[slotIndex % numbers.length];
-
-    const skinPalette = [0xf5d0b5, 0xe8b896, 0xc68652, 0x8d5524, 0xf1c27d];
-    const hairPalette = [0x1c1917, 0x451a03, 0x0f172a, 0x78350f, 0xd97706];
-    const paletteIdx = (team * 5 + slotIndex) % 5;
-    const skinColor = skinPalette[paletteIdx];
-    const hairColor = hairPalette[(paletteIdx + 2) % 5];
-
-    const jerseyColor = isKeeper
-      ? team === TEAM_BLUE
-        ? 0x0284c7
-        : 0xd97706
-      : team === TEAM_BLUE
-        ? 0xffffff
-        : 0x15803d;
-    const shortsColor = isKeeper
-      ? team === TEAM_BLUE
-        ? 0x111827
-        : 0x064e3b
-      : team === TEAM_BLUE
-        ? 0x111827
-        : 0xffffff;
-    const sockColor = isKeeper ? 0xf8fafc : team === TEAM_BLUE ? 0xf8fafc : 0x166534;
-    const trimColor = isKeeper ? 0xfef08a : team === TEAM_BLUE ? 0x1e293b : 0xffffff;
-    const numTextColor = isKeeper ? '#ffffff' : team === TEAM_BLUE ? '#111827' : '#ffffff';
-    const baseRingColor = team === TEAM_BLUE ? 0xe2e8f0 : 0x22c55e;
+    const {
+      numStr,
+      skinColor,
+      hairColor,
+      jerseyColor,
+      shortsColor,
+      sockColor,
+      trimColor,
+      numTextColor,
+      baseRingColor,
+    } = this.getPlayerStyle(team, isKeeper, slotIndex);
 
     // Ground contact shadow + slim team ring flush with grass so cleats stand directly on turf
     const contactShadow = new THREE.Mesh(
@@ -1899,6 +2092,7 @@ export class MatchSimulation {
       this.statusText = 'GOL DO VERDE/BRANCO!';
     }
     this.kickoffTeam = scoringTeam === TEAM_BLUE ? TEAM_RED : TEAM_BLUE;
+    this.lastScorerTeam = scoringTeam;
     this.goalResetTimer = 2.6;
     this.callbacks.onGoal?.(scoringTeam);
     this.emitScore();
@@ -1992,11 +2186,93 @@ export class MatchSimulation {
     p.pos.z = THREE.MathUtils.clamp(p.pos.z, -HALF_WIDTH - pad, HALF_WIDTH + pad);
   }
 
-  private syncPlayerMesh(p: PlayerEntity): void {
+  private syncPlayerMesh(p: PlayerEntity, dt = 0): void {
     p.mesh.position.set(p.pos.x, 0, p.pos.z);
     p.mesh.rotation.y = p.facingAngle;
 
     const speed = Math.hypot(p.vel.x, p.vel.z);
+
+    if (p.mixer && p.actions && p.glbGroup) {
+      let targetClip = 'Idle';
+      if (this.goalResetTimer > 0 && this.lastScorerTeam !== null) {
+        targetClip = p.team === this.lastScorerTeam ? 'Victory' : 'Defeat';
+      } else if (p.diveTimer > 0) {
+        targetClip = 'Jump';
+      } else if (p.tackleTimer > 0) {
+        targetClip = 'Roll';
+      } else if (speed > 0.13) {
+        targetClip = 'Run';
+      } else if (speed > 0.02) {
+        targetClip = 'Walk';
+      }
+
+      if (!p.actions[targetClip]) {
+        targetClip = p.actions.Idle ? 'Idle' : Object.keys(p.actions)[0] ?? '';
+      }
+
+      if (targetClip && p.activeActionName !== targetClip) {
+        const prevAction = p.activeActionName ? p.actions[p.activeActionName] : undefined;
+        const nextAction = p.actions[targetClip];
+        if (nextAction) {
+          nextAction.reset();
+          nextAction.setEffectiveTimeScale(1);
+          nextAction.setEffectiveWeight(1);
+          nextAction.play();
+          if (prevAction && prevAction !== nextAction) {
+            prevAction.crossFadeTo(nextAction, 0.14, true);
+          }
+          p.activeActionName = targetClip;
+        }
+      }
+
+      const activeAction = p.activeActionName ? p.actions[p.activeActionName] : undefined;
+      if (activeAction) {
+        if (p.activeActionName === 'Run') {
+          activeAction.timeScale = THREE.MathUtils.clamp(speed / 0.25, 0.8, 1.45);
+        } else if (p.activeActionName === 'Walk') {
+          activeAction.timeScale = THREE.MathUtils.clamp(speed / 0.1, 0.8, 1.35);
+        } else {
+          activeAction.timeScale = 1.0;
+        }
+      }
+
+      if (dt > 0) {
+        p.mixer.update(dt);
+      }
+
+      if (p.diveTimer > 0) {
+        const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.42, 0, 1) * Math.PI);
+        p.glbGroup.position.y = diveArc * 0.022;
+        p.glbGroup.rotation.x = this.getAttackDir(p.team) * p.diveDir * diveArc * 0.92;
+        p.glbGroup.rotation.z = 0;
+        if (p.glbBones) {
+          p.glbBones.upperArmL?.rotateZ(1.4);
+          p.glbBones.upperArmR?.rotateZ(-1.4);
+        }
+      } else if (p.tackleTimer > 0) {
+        p.glbGroup.position.y = 0.002;
+        p.glbGroup.rotation.x = 0;
+        p.glbGroup.rotation.z = -0.45;
+      } else {
+        p.glbGroup.position.y = 0;
+        p.glbGroup.rotation.x = 0;
+        p.glbGroup.rotation.z = 0;
+
+        if (p.kickAnim > 0 && p.glbBones) {
+          const kickCurve = Math.sin(p.kickAnim * Math.PI);
+          p.glbBones.upperLegR?.rotateX(-kickCurve * 1.15);
+          p.glbBones.lowerLegR?.rotateX(-kickCurve * 0.55);
+          if (p.glbBones.footR) {
+            p.glbBones.footR.position.z += kickCurve * 0.65;
+            p.glbBones.footR.position.y += kickCurve * 0.38;
+            p.glbBones.footR.rotateX(-kickCurve * 0.55);
+          }
+          p.glbBones.torso?.rotateX(-kickCurve * 0.18);
+        }
+      }
+      return;
+    }
+
     if (p.diveTimer > 0) {
       const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.42, 0, 1) * Math.PI);
       p.bodyMesh.position.y = diveArc * 0.024;
