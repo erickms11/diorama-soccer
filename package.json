@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "build": "tsc && vite build",
+    "build:wasm": "mkdir -p public && clang++ --target=wasm32 -O3 -fno-builtin -nostdlib -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -o public/soccer_engine.wasm wasm/soccer_engine.cpp",
+    "build": "npm run build:wasm && tsc && vite build",
     "preview": "vite preview --host"
   },
   "dependencies": {

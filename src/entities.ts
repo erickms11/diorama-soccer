@@ -12,6 +12,7 @@ import {
   TEAM_BLUE,
   TEAM_RED,
 } from './constants';
+import type { WasmSoccerEngine } from './wasmEngine';
 
 export type PlayerRole = 'GK' | 'DEF_L' | 'DEF_R' | 'MID_L' | 'MID_C' | 'MID_R' | 'FWD_L' | 'FWD_R';
 
@@ -85,6 +86,7 @@ export class MatchSimulation {
   private readonly aimGuideGroup: THREE.Group;
   private readonly aimGuideMat: THREE.MeshBasicMaterial;
   private readonly passTargetRing: THREE.Mesh;
+  private readonly supportSpotRing: THREE.Mesh;
   private readonly chargeBarBg: THREE.Mesh;
   private readonly chargeBarFill: THREE.Mesh;
 
@@ -94,6 +96,7 @@ export class MatchSimulation {
   private wasPassHeld = false;
   private autoSwitchCooldown = 0;
   private ballFreeTimer = 0;
+  private ballSpinY = 0;
   private goalResetTimer = 0;
   private statusText = '';
   private kickoffTeam: 0 | 1 = TEAM_BLUE;
@@ -102,6 +105,10 @@ export class MatchSimulation {
   public matchStarted = false;
   public paused = false;
   public matchEnded = false;
+
+  private wasmEngine: WasmSoccerEngine | null = null;
+  private readonly supportSpotPos = new THREE.Vector3();
+  private hasSupportSpot = false;
 
   constructor(fieldRoot: THREE.Group, callbacks: MatchCallbacks = {}) {
     this.fieldRoot = fieldRoot;
@@ -198,6 +205,21 @@ export class MatchSimulation {
     this.passTargetRing.visible = false;
     this.fieldRoot.add(this.passTargetRing);
 
+    // Tactical Support Spot ring calculated by the C++ WebAssembly AI
+    this.supportSpotRing = new THREE.Mesh(
+      new THREE.RingGeometry(PLAYER_RADIUS * 0.9, PLAYER_RADIUS * 1.25, 20),
+      new THREE.MeshBasicMaterial({
+        color: 0x34d399,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.4,
+      })
+    );
+    this.supportSpotRing.rotation.x = -Math.PI / 2;
+    this.supportSpotRing.position.y = 0.0018;
+    this.supportSpotRing.visible = false;
+    this.fieldRoot.add(this.supportSpotRing);
+
     // Charge power bar above controlled player
     this.chargeBarBg = new THREE.Mesh(
       new THREE.PlaneGeometry(0.036, 0.006),
@@ -220,6 +242,10 @@ export class MatchSimulation {
     this.resetKickoff();
     this.statusText = 'AGUARDANDO INÍCIO';
     this.emitScore();
+  }
+
+  public setWasmEngine(engine: WasmSoccerEngine): void {
+    this.wasmEngine = engine;
   }
 
   private getAttackDir(team: 0 | 1): number {
@@ -291,6 +317,8 @@ export class MatchSimulation {
     this.passCharge = 0;
     this.wasPassHeld = false;
     this.ballFreeTimer = 0;
+    this.ballSpinY = 0;
+    this.hasSupportSpot = false;
 
     for (const p of this.players) {
       p.pos.copy(p.homePos);
@@ -350,7 +378,7 @@ export class MatchSimulation {
 
     if (this.goalResetTimer > 0) {
       this.goalResetTimer -= safeDt;
-      this.updateBallPhysics(safeDt, false);
+      this.stepBallStep(safeDt, false);
       this.syncBallMesh();
       this.updateIndicators(elapsedTime, cameraWorldPos);
       if (this.goalResetTimer <= 0) {
@@ -420,7 +448,7 @@ export class MatchSimulation {
     // Handle human kick charging / release
     this.handleHumanKick(safeDt, input);
 
-    // Update all 10 players (only Red AI presses automatically; Blue AI positions without auto-kicking)
+    // Update all players via WebAssembly tactical AI & collision engine when loaded, or TS fallback
     const closestRedAI = this.findClosestOutfieldIndex(TEAM_RED, -1);
 
     for (let i = 0; i < this.players.length; i++) {
@@ -430,18 +458,44 @@ export class MatchSimulation {
       p.diveTimer = Math.max(0, p.diveTimer - safeDt);
       p.tackleTimer = Math.max(0, p.tackleTimer - safeDt);
       p.tackleCooldown = Math.max(0, p.tackleCooldown - safeDt);
-
-      if (i === this.controlledIndex) {
-        this.updateHumanPlayer(p, safeDt, input);
-      } else {
-        const isPresser = i === closestRedAI;
-        this.updateAIPlayer(p, safeDt, isPresser);
-      }
     }
 
-    this.resolvePlayerCollisions();
+    this.updateHumanPlayer(this.players[this.controlledIndex], safeDt, input);
+
+    if (this.wasmEngine?.isReady) {
+      this.wasmEngine.syncToWasm(
+        this.players,
+        this.ballPos,
+        this.ballVel,
+        this.ballSpinY,
+        this.ballFreeTimer
+      );
+      const aiRes = this.wasmEngine.stepAIAndCollisions(
+        safeDt,
+        this.players,
+        this.controlledIndex,
+        closestRedAI,
+        this.currentHalf,
+        Math.random()
+      );
+      this.supportSpotPos.set(aiRes.supportSpotX, 0.0018, aiRes.supportSpotZ);
+      this.hasSupportSpot = true;
+      if (aiRes.aiKick) {
+        const shooter = this.players[aiRes.aiKick.shooterIdx];
+        if (shooter) {
+          this.performKick(shooter, aiRes.aiKick.power, aiRes.aiKick.aimX, aiRes.aiKick.aimZ);
+        }
+      }
+    } else {
+      for (let i = 0; i < this.players.length; i++) {
+        if (i === this.controlledIndex) continue;
+        this.updateAIPlayer(this.players[i], safeDt, i === closestRedAI);
+      }
+      this.resolvePlayerCollisions();
+    }
+
     this.resolveBallPlayerInteractions();
-    this.updateBallPhysics(safeDt, true);
+    this.stepBallStep(safeDt, true);
 
     this.syncBallMesh();
     for (const p of this.players) {
@@ -937,6 +991,8 @@ export class MatchSimulation {
     this.ballPos.x = p.pos.x + dirX * launchDist;
     this.ballPos.z = p.pos.z + dirZ * launchDist;
     this.ballVel.set(dirX * speed, 0.02 + power * 0.06, dirZ * speed);
+    const sideCross = dirX * p.vel.z - dirZ * p.vel.x;
+    this.ballSpinY = THREE.MathUtils.clamp(sideCross * 6.0, -2.0, 2.0);
     p.facingAngle = Math.atan2(-dirZ, dirX);
     p.kickCooldown = 0.30;
     p.kickAnim = 1;
@@ -1005,6 +1061,8 @@ export class MatchSimulation {
     this.ballVel.x = dirX * speed + (hasExplicitAim ? 0 : p.vel.x * 0.25);
     this.ballVel.z = dirZ * speed + (hasExplicitAim ? 0 : p.vel.z * 0.25);
     this.ballVel.y = 0.07 + power * 0.22;
+    const sideCross = dirX * p.vel.z - dirZ * p.vel.x;
+    this.ballSpinY = THREE.MathUtils.clamp(sideCross * 8.5, -2.8, 2.8);
 
     p.kickCooldown = 0.32;
     p.kickAnim = 1;
@@ -1522,17 +1580,7 @@ export class MatchSimulation {
               : enteredPosX
                 ? TEAM_RED
                 : TEAM_BLUE;
-          if (scoringTeam === TEAM_BLUE) {
-            this.blueScore += 1;
-            this.statusText = 'GOL DO PRETO/BRANCO!';
-          } else {
-            this.redScore += 1;
-            this.statusText = 'GOL DO VERDE/BRANCO!';
-          }
-          this.kickoffTeam = scoringTeam === TEAM_BLUE ? TEAM_RED : TEAM_BLUE;
-          this.goalResetTimer = 2.6;
-          this.callbacks.onGoal?.(scoringTeam);
-          this.emitScore();
+          this.recordGoal(scoringTeam);
         }
 
         // Keep ball inside goal net box
@@ -1564,6 +1612,46 @@ export class MatchSimulation {
     // Spin ball sphere visually from velocity
     this.ballSphereMesh.rotation.z -= (this.ballVel.x * dt) / BALL_RADIUS;
     this.ballSphereMesh.rotation.x += (this.ballVel.z * dt) / BALL_RADIUS;
+  }
+
+  private stepBallStep(dt: number, detectGoals: boolean): void {
+    if (this.wasmEngine?.isReady) {
+      this.wasmEngine.syncBallToWasm(
+        this.ballPos,
+        this.ballVel,
+        this.ballSpinY,
+        this.ballFreeTimer
+      );
+      const { result, ballSpinY } = this.wasmEngine.stepBallPhysics(
+        dt,
+        detectGoals,
+        this.currentHalf,
+        this.ballPos,
+        this.ballVel
+      );
+      this.ballSpinY = ballSpinY;
+      this.ballSphereMesh.rotation.z -= (this.ballVel.x * dt) / BALL_RADIUS;
+      this.ballSphereMesh.rotation.x += (this.ballVel.z * dt) / BALL_RADIUS;
+      if (result.goalScoredTeam === 0 || result.goalScoredTeam === 1) {
+        this.recordGoal(result.goalScoredTeam);
+      }
+      return;
+    }
+    this.updateBallPhysics(dt, detectGoals);
+  }
+
+  private recordGoal(scoringTeam: 0 | 1): void {
+    if (scoringTeam === TEAM_BLUE) {
+      this.blueScore += 1;
+      this.statusText = 'GOL DO PRETO/BRANCO!';
+    } else {
+      this.redScore += 1;
+      this.statusText = 'GOL DO VERDE/BRANCO!';
+    }
+    this.kickoffTeam = scoringTeam === TEAM_BLUE ? TEAM_RED : TEAM_BLUE;
+    this.goalResetTimer = 2.6;
+    this.callbacks.onGoal?.(scoringTeam);
+    this.emitScore();
   }
 
   private switchToClosestBluePlayer(): void {
@@ -1603,6 +1691,21 @@ export class MatchSimulation {
     dirZ: number,
     hasDirectionalInput = false
   ): PlayerEntity | null {
+    if (this.wasmEngine?.isReady) {
+      const passerIdx = this.players.indexOf(passer);
+      if (passerIdx !== -1) {
+        this.wasmEngine.syncPlayersToWasm(this.players);
+        const targetIdx = this.wasmEngine.findPassTarget(
+          passerIdx,
+          dirX,
+          dirZ,
+          hasDirectionalInput,
+          this.currentHalf
+        );
+        return targetIdx >= 0 && targetIdx < this.players.length ? this.players[targetIdx] : null;
+      }
+    }
+
     let bestInCone: PlayerEntity | null = null;
     let bestScore = -Infinity;
     let closestMate: PlayerEntity | null = null;
@@ -1753,6 +1856,19 @@ export class MatchSimulation {
       }
     } else {
       this.passTargetRing.visible = false;
+    }
+
+    const showSupportSpot =
+      this.hasSupportSpot &&
+      this.matchStarted &&
+      !this.paused &&
+      !this.waitingSecondHalf &&
+      !this.matchEnded &&
+      this.goalResetTimer <= 0;
+    this.supportSpotRing.visible = showSupportSpot;
+    if (showSupportSpot) {
+      this.supportSpotRing.position.set(this.supportSpotPos.x, 0.0018, this.supportSpotPos.z);
+      this.supportSpotRing.scale.setScalar(1 + Math.sin(elapsedTime * 5) * 0.06);
     }
   }
 

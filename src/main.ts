@@ -3,6 +3,7 @@ import './style.css';
 import { DEFAULT_DIORAMA_POS, DEFAULT_DIORAMA_SCALE } from './constants';
 import { MatchSimulation } from './entities';
 import { StadiumDiorama } from './stadium';
+import { WasmSoccerEngine } from './wasmEngine';
 import { XRAndInputManager } from './xrInput';
 
 const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
@@ -229,6 +230,17 @@ async function initWebXRButtons(): Promise<void> {
 }
 
 void initWebXRButtons();
+
+WasmSoccerEngine.load('./soccer_engine.wasm')
+  .then((engine) => {
+    match.setWasmEngine(engine);
+    if (xrStatusEl.textContent && !xrStatusEl.textContent.includes('Wasm')) {
+      xrStatusEl.textContent += ' • Motor C++/WebAssembly ativo';
+    }
+  })
+  .catch(() => {
+    // Fallback automático para simulação TypeScript caso o .wasm não carregue
+  });
 
 btnStart.addEventListener('click', () => {
   if (match.waitingSecondHalf) {
