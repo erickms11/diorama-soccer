@@ -24,8 +24,13 @@ export interface PlayerEntity {
   bodyMesh: THREE.Group;
   leftLeg: THREE.Group;
   rightLeg: THREE.Group;
+  leftShin: THREE.Group;
+  rightShin: THREE.Group;
   leftArm: THREE.Group;
   rightArm: THREE.Group;
+  leftForearm: THREE.Group;
+  rightForearm: THREE.Group;
+  headGroup: THREE.Group;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   homePos: THREE.Vector3;
@@ -523,11 +528,19 @@ export class MatchSimulation {
         const f = formations[i];
         const x = team === TEAM_BLUE ? f.x : -f.x;
         const z = team === TEAM_BLUE ? f.z : -f.z;
-        const { root, body, leftLeg, rightLeg, leftArm, rightArm } = this.createPlayerMesh(
-          team,
-          f.role === 'GK',
-          i
-        );
+        const {
+          root,
+          body,
+          leftLeg,
+          rightLeg,
+          leftShin,
+          rightShin,
+          leftArm,
+          rightArm,
+          leftForearm,
+          rightForearm,
+          headGroup,
+        } = this.createPlayerMesh(team, f.role === 'GK', i);
         this.fieldRoot.add(root);
 
         this.players.push({
@@ -538,8 +551,13 @@ export class MatchSimulation {
           bodyMesh: body,
           leftLeg,
           rightLeg,
+          leftShin,
+          rightShin,
           leftArm,
           rightArm,
+          leftForearm,
+          rightForearm,
+          headGroup,
           pos: new THREE.Vector3(x, 0, z),
           vel: new THREE.Vector3(),
           homePos: new THREE.Vector3(x, 0, z),
@@ -582,19 +600,24 @@ export class MatchSimulation {
     body: THREE.Group;
     leftLeg: THREE.Group;
     rightLeg: THREE.Group;
+    leftShin: THREE.Group;
+    rightShin: THREE.Group;
     leftArm: THREE.Group;
     rightArm: THREE.Group;
+    leftForearm: THREE.Group;
+    rightForearm: THREE.Group;
+    headGroup: THREE.Group;
   } {
     const root = new THREE.Group();
     const body = new THREE.Group();
-    body.scale.set(0.96, 1.22, 0.96);
+    body.scale.set(1.0, 1.18, 1.0);
     root.add(body);
 
     const numbers = ['1', '2', '4', '7', '8', '10', '9', '11'];
     const numStr = numbers[slotIndex % numbers.length];
 
     const skinPalette = [0xf5d0b5, 0xe8b896, 0xc68652, 0x8d5524, 0xf1c27d];
-    const hairPalette = [0x1c1917, 0x451a03, 0x0f172a, 0x92400e, 0xd97706];
+    const hairPalette = [0x1c1917, 0x451a03, 0x0f172a, 0x78350f, 0xd97706];
     const paletteIdx = (team * 5 + slotIndex) % 5;
     const skinColor = skinPalette[paletteIdx];
     const hairColor = hairPalette[(paletteIdx + 2) % 5];
@@ -614,192 +637,419 @@ export class MatchSimulation {
         ? 0x111827
         : 0xffffff;
     const sockColor = isKeeper ? 0xf8fafc : team === TEAM_BLUE ? 0xf8fafc : 0x166534;
-    const trimColor = isKeeper ? 0xfef08a : team === TEAM_BLUE ? 0x111827 : 0xffffff;
+    const trimColor = isKeeper ? 0xfef08a : team === TEAM_BLUE ? 0x1e293b : 0xffffff;
     const numTextColor = isKeeper ? '#ffffff' : team === TEAM_BLUE ? '#111827' : '#ffffff';
     const baseRingColor = team === TEAM_BLUE ? 0xe2e8f0 : 0x22c55e;
 
-    // Low-profile tabletop base disc + subtle colored team rim ring
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(PLAYER_RADIUS * 0.85, PLAYER_RADIUS * 0.92, 0.004, 20),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.45 })
+    // Ground contact shadow + slim team ring flush with grass so cleats stand directly on turf
+    const contactShadow = new THREE.Mesh(
+      new THREE.CircleGeometry(PLAYER_RADIUS * 0.7, 20),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+      })
     );
-    base.position.y = 0.002;
-    base.castShadow = true;
-    root.add(base);
+    contactShadow.rotation.x = -Math.PI / 2;
+    contactShadow.position.y = 0.0005;
+    root.add(contactShadow);
 
     const baseRing = new THREE.Mesh(
-      new THREE.RingGeometry(PLAYER_RADIUS * 0.72, PLAYER_RADIUS * 0.85, 20),
-      new THREE.MeshBasicMaterial({ color: baseRingColor, side: THREE.DoubleSide })
+      new THREE.RingGeometry(PLAYER_RADIUS * 0.65, PLAYER_RADIUS * 0.74, 24),
+      new THREE.MeshBasicMaterial({
+        color: baseRingColor,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.72,
+      })
     );
     baseRing.rotation.x = -Math.PI / 2;
-    baseRing.position.y = 0.0042;
+    baseRing.position.y = 0.0009;
     root.add(baseRing);
 
-    const shortsMat = new THREE.MeshStandardMaterial({ color: shortsColor, roughness: 0.58 });
-    const sockMat = new THREE.MeshStandardMaterial({ color: sockColor, roughness: 0.55 });
-    const bootMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.35 });
-    const bootAccentMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.4 });
-    const jerseyMat = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.48 });
-    const trimMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.45 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.65 });
+    const shortsMat = new THREE.MeshStandardMaterial({ color: shortsColor, roughness: 0.62 });
+    const sockMat = new THREE.MeshStandardMaterial({ color: sockColor, roughness: 0.58 });
+    const bootMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.36 });
+    const soleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+    const bootAccentMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.42 });
+    const jerseyMat = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.52 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.48 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.68 });
 
-    // Articulated legs (pivoted at hip height)
-    const createLeg = (zOffset: number): THREE.Group => {
+    // Articulated 2-segment legs: hip -> thigh/shorts -> knee pivot -> calf/sock -> sculpted cleat
+    const createLeg = (zOffset: number): { legGroup: THREE.Group; shinGroup: THREE.Group } => {
       const legGroup = new THREE.Group();
-      legGroup.position.set(0, 0.022, zOffset);
+      legGroup.position.set(0, 0.0296, zOffset);
 
-      const thigh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.0048, 0.0042, 0.008, 10),
+      const hipJoint = new THREE.Mesh(new THREE.SphereGeometry(0.0044, 10, 10), shortsMat);
+      hipJoint.scale.set(0.88, 0.9, 0.96);
+      legGroup.add(hipJoint);
+
+      const shortsLeg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0048, 0.0043, 0.0085, 12),
         shortsMat
       );
-      thigh.position.y = -0.004;
-      thigh.castShadow = true;
-      legGroup.add(thigh);
+      shortsLeg.scale.set(0.88, 1, 0.96);
+      shortsLeg.position.y = -0.004;
+      shortsLeg.castShadow = true;
+      legGroup.add(shortsLeg);
 
-      const sock = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.0040, 0.0033, 0.010, 10),
+      const shortsHem = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0044, 0.0045, 0.0012, 12),
+        trimMat
+      );
+      shortsHem.scale.set(0.88, 1, 0.96);
+      shortsHem.position.y = -0.0082;
+      legGroup.add(shortsHem);
+
+      const thighSkin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0039, 0.0033, 0.0058, 12),
+        skinMat
+      );
+      thighSkin.position.y = -0.0108;
+      thighSkin.castShadow = true;
+      legGroup.add(thighSkin);
+
+      const knee = new THREE.Mesh(new THREE.SphereGeometry(0.0032, 10, 10), skinMat);
+      knee.position.y = -0.0135;
+      legGroup.add(knee);
+
+      const shinGroup = new THREE.Group();
+      shinGroup.position.set(0, -0.0135, 0);
+      legGroup.add(shinGroup);
+
+      const sockBand = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0036, 0.0037, 0.0015, 12),
+        trimMat
+      );
+      sockBand.position.y = -0.0014;
+      shinGroup.add(sockBand);
+
+      const calfSock = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0035, 0.0024, 0.0112, 12),
         sockMat
       );
-      sock.position.y = -0.012;
-      sock.castShadow = true;
-      legGroup.add(sock);
+      calfSock.position.y = -0.0064;
+      calfSock.castShadow = true;
+      shinGroup.add(calfSock);
 
-      const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.011, 0.0042, 0.0052), bootMat);
-      cleat.position.set(0.002, -0.0175, 0);
-      cleat.castShadow = true;
-      legGroup.add(cleat);
+      // Sculpted soccer boot with heel cup, toe box, laces area, stripe & sole
+      const bootUpper = new THREE.Mesh(new THREE.BoxGeometry(0.0088, 0.0032, 0.0044), bootMat);
+      bootUpper.position.set(0.0014, -0.0135, 0);
+      bootUpper.castShadow = true;
+      shinGroup.add(bootUpper);
 
-      const cleatStripe = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.0014, 0.0055), bootAccentMat);
-      cleatStripe.position.set(0.003, -0.0168, 0);
-      legGroup.add(cleatStripe);
+      const toeCap = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 10, 8), bootMat);
+      toeCap.scale.set(1.3, 0.72, 1.02);
+      toeCap.position.set(0.0058, -0.0139, 0);
+      toeCap.castShadow = true;
+      shinGroup.add(toeCap);
+
+      const heelCup = new THREE.Mesh(new THREE.BoxGeometry(0.0032, 0.0038, 0.0045), bootMat);
+      heelCup.position.set(-0.002, -0.0132, 0);
+      shinGroup.add(heelCup);
+
+      const cleatStripe = new THREE.Mesh(
+        new THREE.BoxGeometry(0.0048, 0.0011, 0.0047),
+        bootAccentMat
+      );
+      cleatStripe.position.set(0.0016, -0.0134, 0);
+      shinGroup.add(cleatStripe);
+
+      const outsole = new THREE.Mesh(new THREE.BoxGeometry(0.0102, 0.0009, 0.0046), soleMat);
+      outsole.position.set(0.0018, -0.0152, 0);
+      shinGroup.add(outsole);
 
       body.add(legGroup);
-      return legGroup;
+      return { legGroup, shinGroup };
     };
 
-    const leftLeg = createLeg(-0.0055);
-    const rightLeg = createLeg(0.0055);
+    const { legGroup: leftLeg, shinGroup: leftShin } = createLeg(-0.0054);
+    const { legGroup: rightLeg, shinGroup: rightShin } = createLeg(0.0054);
 
-    // Pelvis / shorts + athletic torso + collar + back jersey number
+    // Anatomical pelvis + tapered waist + athletic chest + sloped clavicles + collar + badge
     const pelvis = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.0115, 0.0108, 0.010, 14),
+      new THREE.CylinderGeometry(0.0094, 0.0090, 0.0085, 14),
       shortsMat
     );
-    pelvis.position.y = 0.023;
+    pelvis.scale.set(0.68, 1, 1.12);
+    pelvis.position.y = 0.0306;
     pelvis.castShadow = true;
     body.add(pelvis);
 
-    const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.0132, 0.0112, 0.021, 14),
+    const waist = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0091, 0.0086, 0.0082, 14),
       jerseyMat
     );
-    torso.position.y = 0.037;
-    torso.castShadow = true;
-    body.add(torso);
+    waist.scale.set(0.65, 1, 1.04);
+    waist.position.y = 0.0372;
+    waist.castShadow = true;
+    body.add(waist);
 
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.0068, 0.0016, 8, 16), trimMat);
+    const chest = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0115, 0.0090, 0.0145, 16),
+      jerseyMat
+    );
+    chest.scale.set(0.68, 1, 1.18);
+    chest.position.y = 0.0468;
+    chest.castShadow = true;
+    body.add(chest);
+
+    const upperShoulders = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0058, 0.0112, 0.0040, 14),
+      jerseyMat
+    );
+    upperShoulders.scale.set(0.64, 1, 1.16);
+    upperShoulders.position.y = 0.0545;
+    upperShoulders.castShadow = true;
+    body.add(upperShoulders);
+
+    // Jersey side rib stripes + front chest crest
+    for (const side of [-1, 1] as const) {
+      const sideStripe = new THREE.Mesh(
+        new THREE.BoxGeometry(0.0022, 0.0195, 0.0012),
+        trimMat
+      );
+      sideStripe.position.set(0, 0.0435, side * 0.0114);
+      sideStripe.rotation.x = side * -0.11;
+      body.add(sideStripe);
+    }
+
+    const chestCrest = new THREE.Mesh(new THREE.BoxGeometry(0.0010, 0.0032, 0.0028), trimMat);
+    chestCrest.position.set(0.0074, 0.0485, 0.0042);
+    chestCrest.rotation.z = 0.12;
+    body.add(chestCrest);
+
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.0047, 0.0011, 8, 16), trimMat);
     collar.rotation.x = Math.PI / 2;
-    collar.position.y = 0.0475;
+    collar.position.set(0.0004, 0.0556, 0);
     body.add(collar);
 
     const numBadge = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.013, 0.013),
+      new THREE.PlaneGeometry(0.0115, 0.0115),
       new THREE.MeshBasicMaterial({
         map: this.createNumberBadgeTexture(numStr, numTextColor),
         transparent: true,
         depthWrite: false,
       })
     );
-    numBadge.position.set(-0.0134, 0.037, 0);
+    numBadge.position.set(-0.0080, 0.0462, 0);
     numBadge.rotation.y = -Math.PI / 2;
     body.add(numBadge);
 
-    // Articulated arms (pivoted at shoulder height)
+    // Articulated 2-segment arms: deltoid shoulder -> sleeve -> upper arm -> elbow -> forearm -> hand/glove
     const gloveMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.4 });
-    const createArm = (zOffset: number): THREE.Group => {
+    const createArm = (
+      zOffset: number
+    ): { armGroup: THREE.Group; forearmGroup: THREE.Group } => {
       const armGroup = new THREE.Group();
-      armGroup.position.set(0, 0.045, zOffset);
+      armGroup.position.set(0, 0.0518, zOffset);
+
+      const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.0041, 10, 10), jerseyMat);
+      shoulder.castShadow = true;
+      armGroup.add(shoulder);
 
       const sleeve = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.0042, 0.0038, 0.008, 10),
+        new THREE.CylinderGeometry(0.0039, 0.0034, 0.0076, 10),
         jerseyMat
       );
-      sleeve.position.y = -0.0035;
+      sleeve.position.y = -0.0036;
       sleeve.castShadow = true;
       armGroup.add(sleeve);
 
-      const forearm = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.0035, 0.0030, 0.009, 10),
-        skinMat
+      const sleeveCuff = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0035, 0.0035, 0.0010, 10),
+        trimMat
       );
-      forearm.position.y = -0.011;
-      forearm.castShadow = true;
-      armGroup.add(forearm);
+      sleeveCuff.position.y = -0.0072;
+      armGroup.add(sleeveCuff);
+
+      const upperArmMat = isKeeper ? jerseyMat : skinMat;
+      const bicep = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0031, 0.0028, 0.0042, 10),
+        upperArmMat
+      );
+      bicep.position.y = -0.0088;
+      bicep.castShadow = true;
+      armGroup.add(bicep);
+
+      const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.0028, 8, 8), upperArmMat);
+      elbow.position.y = -0.0108;
+      armGroup.add(elbow);
+
+      const forearmGroup = new THREE.Group();
+      forearmGroup.position.set(0, -0.0108, 0);
+      armGroup.add(forearmGroup);
+
+      const forearmMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0028, 0.0022, 0.0082, 10),
+        upperArmMat
+      );
+      forearmMesh.position.y = -0.0041;
+      forearmMesh.castShadow = true;
+      forearmGroup.add(forearmMesh);
+
+      const wristband = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0023, 0.0023, 0.0014, 10),
+        trimMat
+      );
+      wristband.position.y = -0.0078;
+      forearmGroup.add(wristband);
 
       if (isKeeper) {
-        const glove = new THREE.Mesh(new THREE.BoxGeometry(0.0065, 0.0065, 0.0048), gloveMat);
-        glove.position.y = -0.0165;
+        const glove = new THREE.Mesh(new THREE.BoxGeometry(0.0048, 0.0054, 0.0036), gloveMat);
+        glove.position.set(0.0005, -0.0102, 0);
         glove.castShadow = true;
-        armGroup.add(glove);
+        forearmGroup.add(glove);
       } else {
-        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.0032, 8, 8), skinMat);
-        hand.position.y = -0.0165;
-        armGroup.add(hand);
+        const palm = new THREE.Mesh(new THREE.SphereGeometry(0.0025, 8, 8), skinMat);
+        palm.scale.set(0.95, 1.35, 0.65);
+        palm.position.set(0.0002, -0.0098, 0);
+        palm.castShadow = true;
+        forearmGroup.add(palm);
+
+        const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.0011, 6, 6), skinMat);
+        thumb.position.set(0.0018, -0.0088, 0);
+        forearmGroup.add(thumb);
       }
 
       body.add(armGroup);
-      return armGroup;
+      return { armGroup, forearmGroup };
     };
 
-    const leftArm = createArm(-0.0142);
-    const rightArm = createArm(0.0142);
+    const { armGroup: leftArm, forearmGroup: leftForearm } = createArm(-0.0138);
+    const { armGroup: rightArm, forearmGroup: rightForearm } = createArm(0.0138);
 
-    // Neck, head, expressive eyes & hair style
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.005, 0.005, 10), skinMat);
-    neck.position.y = 0.049;
-    body.add(neck);
+    // Articulated head group: neck -> cranium + jawline -> ears, nose, sclera+pupils, brows & hairstyles
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0, 0.0558, 0);
+    body.add(headGroup);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.0108, 16, 14), skinMat);
-    head.position.y = 0.057;
-    head.castShadow = true;
-    body.add(head);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.0036, 0.0041, 0.0052, 12), skinMat);
+    neck.position.y = 0.0022;
+    neck.castShadow = true;
+    headGroup.add(neck);
 
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
-    const eyeGeo = new THREE.SphereGeometry(0.0014, 6, 6);
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(0.0098, 0.058, -0.0036);
-    body.add(leftEye);
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(0.0098, 0.058, 0.0036);
-    body.add(rightEye);
+    const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.0083, 18, 16), skinMat);
+    cranium.scale.set(1.02, 1.14, 0.90);
+    cranium.position.y = 0.0098;
+    cranium.castShadow = true;
+    headGroup.add(cranium);
 
-    const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.72 });
-    const hairCap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.0113, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.58),
-      hairMat
-    );
-    hairCap.position.set(-0.0008, 0.0575, 0);
-    hairCap.rotation.z = 0.22;
-    body.add(hairCap);
+    const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.0053, 12, 10), skinMat);
+    jaw.scale.set(1.06, 0.85, 0.78);
+    jaw.position.set(0.0021, 0.0056, 0);
+    headGroup.add(jaw);
 
-    if (slotIndex % 2 === 1) {
-      // Sporty top crest / quiff
-      const quiff = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.0045, 0.005), hairMat);
-      quiff.position.set(0.003, 0.068, 0);
-      quiff.rotation.z = -0.25;
-      body.add(quiff);
-    } else if (!isKeeper) {
-      // Athletic headband for alternate players
-      const headband = new THREE.Mesh(
-        new THREE.TorusGeometry(0.0107, 0.0013, 6, 16),
-        trimMat
-      );
-      headband.rotation.x = Math.PI / 2;
-      headband.position.y = 0.0615;
-      body.add(headband);
+    const earGeo = new THREE.SphereGeometry(0.0017, 8, 8);
+    for (const side of [-1, 1] as const) {
+      const ear = new THREE.Mesh(earGeo, skinMat);
+      ear.scale.set(0.55, 1.2, 0.45);
+      ear.position.set(0.0002, 0.0094, side * 0.0075);
+      headGroup.add(ear);
     }
 
-    return { root, body, leftLeg, rightLeg, leftArm, rightArm };
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.0015, 8, 8), skinMat);
+    nose.scale.set(1.25, 1.1, 0.82);
+    nose.position.set(0.0084, 0.0090, 0);
+    headGroup.add(nose);
+
+    const scleraMat = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
+    const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+    const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.78 });
+    const scleraGeo = new THREE.SphereGeometry(0.0012, 8, 8);
+    const pupilGeo = new THREE.SphereGeometry(0.00075, 6, 6);
+    const browGeo = new THREE.BoxGeometry(0.0010, 0.0007, 0.0025);
+
+    for (const side of [-1, 1] as const) {
+      const sclera = new THREE.Mesh(scleraGeo, scleraMat);
+      sclera.scale.set(0.65, 0.95, 1.0);
+      sclera.position.set(0.0078, 0.0105, side * 0.0030);
+      headGroup.add(sclera);
+
+      const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+      pupil.position.set(0.0084, 0.0105, side * 0.0030);
+      headGroup.add(pupil);
+
+      const brow = new THREE.Mesh(browGeo, hairMat);
+      brow.position.set(0.0080, 0.0124, side * 0.0030);
+      brow.rotation.x = side * 0.12;
+      headGroup.add(brow);
+    }
+
+    const mouth = new THREE.Mesh(
+      new THREE.BoxGeometry(0.0007, 0.0006, 0.0026),
+      new THREE.MeshBasicMaterial({ color: 0x9f5f52 })
+    );
+    mouth.position.set(0.0073, 0.0066, 0);
+    headGroup.add(mouth);
+
+    // Hair cap + varied human hairstyles
+    const hairCap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0088, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      hairMat
+    );
+    hairCap.scale.set(1.02, 1.12, 0.91);
+    hairCap.position.set(-0.0006, 0.0104, 0);
+    hairCap.rotation.z = 0.24;
+    headGroup.add(hairCap);
+
+    const hairBack = new THREE.Mesh(
+      new THREE.SphereGeometry(0.0068, 12, 10),
+      hairMat
+    );
+    hairBack.scale.set(0.65, 1.0, 0.88);
+    hairBack.position.set(-0.0048, 0.0088, 0);
+    headGroup.add(hairBack);
+
+    const hairStyle = slotIndex % 4;
+    if (hairStyle === 1) {
+      // Sculpted forward quiff / crest
+      const quiff = new THREE.Mesh(new THREE.BoxGeometry(0.0072, 0.0038, 0.0052), hairMat);
+      quiff.position.set(0.0022, 0.0196, 0);
+      quiff.rotation.z = -0.26;
+      headGroup.add(quiff);
+    } else if (hairStyle === 2) {
+      // Textured curly / afro crown
+      const curlOffsets: [number, number, number, number][] = [
+        [0, 0.0195, 0, 0.0058],
+        [0.0032, 0.0182, 0.0032, 0.0042],
+        [0.0032, 0.0182, -0.0032, 0.0042],
+        [-0.0034, 0.0180, 0.0030, 0.0042],
+        [-0.0034, 0.0180, -0.0030, 0.0042],
+      ];
+      for (const [cx, cy, cz, cr] of curlOffsets) {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(cr, 8, 8), hairMat);
+        puff.position.set(cx, cy, cz);
+        headGroup.add(puff);
+      }
+    } else if (hairStyle === 3) {
+      // Athletic headband + back knot/bun
+      const headband = new THREE.Mesh(new THREE.TorusGeometry(0.0080, 0.0010, 6, 18), trimMat);
+      headband.rotation.x = Math.PI / 2;
+      headband.scale.set(1.02, 0.90, 1);
+      headband.position.set(-0.0002, 0.0138, 0);
+      headGroup.add(headband);
+
+      const hairKnot = new THREE.Mesh(new THREE.SphereGeometry(0.0032, 8, 8), hairMat);
+      hairKnot.position.set(-0.0088, 0.0112, 0);
+      headGroup.add(hairKnot);
+    }
+
+    return {
+      root,
+      body,
+      leftLeg,
+      rightLeg,
+      leftShin,
+      rightShin,
+      leftArm,
+      rightArm,
+      leftForearm,
+      rightForearm,
+      headGroup,
+    };
   }
 
   private updateHumanPlayer(p: PlayerEntity, dt: number, input: MatchInputState): void {
@@ -1751,40 +2001,73 @@ export class MatchSimulation {
       const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.42, 0, 1) * Math.PI);
       p.bodyMesh.position.y = diveArc * 0.024;
       p.bodyMesh.rotation.x = this.getAttackDir(p.team) * p.diveDir * diveArc * 0.92;
+      p.bodyMesh.rotation.y = 0;
       p.bodyMesh.rotation.z = 0;
 
+      p.headGroup.rotation.y = 0;
+      p.headGroup.rotation.z = 0.18;
       p.leftArm.rotation.z = 2.45;
       p.rightArm.rotation.z = 2.45;
       p.leftArm.rotation.x = 0.15;
       p.rightArm.rotation.x = -0.15;
+      p.leftForearm.rotation.z = 0.22;
+      p.rightForearm.rotation.z = 0.22;
       p.leftLeg.rotation.z = -0.25;
-      p.rightLeg.rotation.z = -0.25;
+      p.rightLeg.rotation.z = -0.15;
+      p.leftShin.rotation.z = -0.35;
+      p.rightShin.rotation.z = -0.55;
     } else if (p.tackleTimer > 0) {
       p.bodyMesh.position.y = 0.002;
       p.bodyMesh.rotation.x = 0;
+      p.bodyMesh.rotation.y = -0.18;
       p.bodyMesh.rotation.z = -0.82;
 
-      p.rightLeg.rotation.z = 0.95;
-      p.leftLeg.rotation.z = -0.45;
-      p.leftArm.rotation.z = -0.6;
-      p.rightArm.rotation.z = 0.7;
+      p.headGroup.rotation.y = 0.18;
+      p.headGroup.rotation.z = 0.35;
+      p.rightLeg.rotation.z = 0.98;
+      p.rightShin.rotation.z = -0.12;
+      p.leftLeg.rotation.z = -0.35;
+      p.leftShin.rotation.z = -1.05;
+      p.leftArm.rotation.z = -0.55;
+      p.rightArm.rotation.z = 0.65;
       p.leftArm.rotation.x = 0.14;
       p.rightArm.rotation.x = -0.14;
+      p.leftForearm.rotation.z = 0.55;
+      p.rightForearm.rotation.z = 0.72;
     } else {
-      const bob = speed > 0.02 ? Math.abs(Math.sin(p.animPhase)) * 0.0035 : 0;
+      const runBlend = THREE.MathUtils.clamp(speed / 0.28, 0, 1);
+      const bob = speed > 0.02 ? Math.abs(Math.sin(p.animPhase)) * 0.0032 : 0;
       p.bodyMesh.position.y = bob;
       p.bodyMesh.rotation.x = 0;
-      p.bodyMesh.rotation.z =
-        p.kickAnim > 0 ? Math.sin(p.kickAnim * Math.PI) * 0.22 : -Math.min(0.15, speed * 0.28);
 
-      const stride = Math.min(1, speed / 0.36) * 0.75;
+      const stride = Math.min(1, speed / 0.36) * 0.78;
       const swing = Math.sin(p.animPhase) * stride;
+      const kickCurve = Math.sin(p.kickAnim * Math.PI);
+
+      p.bodyMesh.rotation.z =
+        p.kickAnim > 0 ? kickCurve * 0.22 : -Math.min(0.16, speed * 0.28);
+      p.bodyMesh.rotation.y = p.kickAnim > 0 ? kickCurve * 0.24 : -swing * 0.16;
+      p.headGroup.rotation.y = -p.bodyMesh.rotation.y * 0.85;
+      p.headGroup.rotation.z = runBlend * 0.08;
+
+      const recoveryWave = Math.sin(p.animPhase - 0.85);
       p.leftLeg.rotation.z = swing;
-      p.rightLeg.rotation.z = p.kickAnim > 0 ? Math.sin(p.kickAnim * Math.PI) * 1.15 : -swing;
-      p.leftArm.rotation.z = p.kickAnim > 0 ? -0.55 : -swing * 0.85;
-      p.rightArm.rotation.z = p.kickAnim > 0 ? 0.65 : swing * 0.85;
+      p.leftShin.rotation.z = -Math.max(0.06, (0.5 - 0.5 * recoveryWave) * runBlend * 0.95);
+
+      p.rightLeg.rotation.z = p.kickAnim > 0 ? kickCurve * 1.15 : -swing;
+      p.rightShin.rotation.z =
+        p.kickAnim > 0
+          ? -Math.max(0.05, (1 - kickCurve) * 0.48)
+          : -Math.max(0.06, (0.5 + 0.5 * recoveryWave) * runBlend * 0.95);
+
+      p.leftArm.rotation.z = p.kickAnim > 0 ? -0.52 : -swing * 0.82;
+      p.rightArm.rotation.z = p.kickAnim > 0 ? 0.62 : swing * 0.82;
       p.leftArm.rotation.x = 0.14;
       p.rightArm.rotation.x = -0.14;
+      p.leftForearm.rotation.z =
+        p.kickAnim > 0 ? 0.65 : 0.16 + runBlend * (0.42 + Math.max(0, -swing) * 0.45);
+      p.rightForearm.rotation.z =
+        p.kickAnim > 0 ? 0.45 : 0.16 + runBlend * (0.42 + Math.max(0, swing) * 0.45);
     }
   }
 
