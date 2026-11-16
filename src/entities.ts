@@ -16,7 +16,19 @@ import {
 } from './constants';
 import type { WasmSoccerEngine } from './wasmEngine';
 
-export type PlayerRole = 'GK' | 'DEF_L' | 'DEF_R' | 'MID_L' | 'MID_C' | 'MID_R' | 'FWD_L' | 'FWD_R';
+export type PlayerRole =
+  | 'GK'
+  | 'DEF_L'
+  | 'DEF_CL'
+  | 'DEF_CR'
+  | 'DEF_R'
+  | 'MID_D'
+  | 'MID_L'
+  | 'MID_C'
+  | 'MID_R'
+  | 'FWD_L'
+  | 'FWD_C'
+  | 'FWD_R';
 
 export interface PlayerEntity {
   id: number;
@@ -547,13 +559,16 @@ export class MatchSimulation {
   private spawnTeams(): void {
     const formations: Array<{ role: PlayerRole; x: number; z: number }> = [
       { role: 'GK', x: -HALF_LENGTH + 0.08, z: 0 },
-      { role: 'DEF_L', x: -HALF_LENGTH * 0.50, z: -HALF_WIDTH * 0.35 },
-      { role: 'DEF_R', x: -HALF_LENGTH * 0.50, z: HALF_WIDTH * 0.35 },
-      { role: 'MID_L', x: -HALF_LENGTH * 0.22, z: -HALF_WIDTH * 0.65 },
-      { role: 'MID_C', x: -HALF_LENGTH * 0.28, z: 0 },
-      { role: 'MID_R', x: -HALF_LENGTH * 0.22, z: HALF_WIDTH * 0.65 },
-      { role: 'FWD_L', x: -HALF_LENGTH * 0.08, z: -HALF_WIDTH * 0.30 },
-      { role: 'FWD_R', x: -HALF_LENGTH * 0.08, z: HALF_WIDTH * 0.30 },
+      { role: 'DEF_L', x: -HALF_LENGTH * 0.48, z: -HALF_WIDTH * 0.72 },  // Lateral Esquerdo (LB)
+      { role: 'DEF_CL', x: -HALF_LENGTH * 0.52, z: -HALF_WIDTH * 0.24 }, // Zagueiro Central Esquerdo (CB)
+      { role: 'DEF_CR', x: -HALF_LENGTH * 0.52, z: HALF_WIDTH * 0.24 },  // Zagueiro Central Direito (CB)
+      { role: 'DEF_R', x: -HALF_LENGTH * 0.48, z: HALF_WIDTH * 0.72 },   // Lateral Direito (RB)
+      { role: 'MID_D', x: -HALF_LENGTH * 0.35, z: 0 },                   // Volante de Contenção (DMF)
+      { role: 'MID_L', x: -HALF_LENGTH * 0.22, z: -HALF_WIDTH * 0.46 },  // Meia Armador Esquerdo (CMF)
+      { role: 'MID_R', x: -HALF_LENGTH * 0.22, z: HALF_WIDTH * 0.46 },   // Meia Armador Direito (CMF)
+      { role: 'FWD_L', x: -HALF_LENGTH * 0.08, z: -HALF_WIDTH * 0.65 },  // Ponta Esquerda (LWF)
+      { role: 'FWD_C', x: -HALF_LENGTH * 0.06, z: 0 },                   // Centroavante Artilheiro (CF)
+      { role: 'FWD_R', x: -HALF_LENGTH * 0.08, z: HALF_WIDTH * 0.65 },   // Ponta Direita (RWF)
     ];
 
     let id = 0;
@@ -611,7 +626,7 @@ export class MatchSimulation {
   }
 
   private getPlayerStyle(team: 0 | 1, isKeeper: boolean, slotIndex: number) {
-    const numbers = ['1', '2', '4', '7', '8', '10', '9', '11'];
+    const numbers = ['1', '2', '3', '4', '5', '6', '8', '7', '9', '10', '11'];
     const numStr = numbers[slotIndex % numbers.length];
 
     const skinPalette = [0xf5d0b5, 0xe8b896, 0xc68652, 0x8d5524, 0xf1c27d];
@@ -682,7 +697,7 @@ export class MatchSimulation {
 
           const glbGroup = new THREE.Group();
           const facingWrapper = new THREE.Group();
-          facingWrapper.scale.setScalar(0.044); // +10% athlete scale
+          facingWrapper.scale.setScalar(isKeeper ? 0.064 : 0.053); // Field +20%, GK imposing
           facingWrapper.rotation.y = Math.PI / 2;
           facingWrapper.add(clonedScene);
           glbGroup.add(facingWrapper);
@@ -716,20 +731,30 @@ export class MatchSimulation {
             const meshName = obj.name.toLowerCase();
 
             if (matName.includes('shirt') || meshName.includes('shirt')) {
+              mat.map = null;
               mat.color.setHex(style.jerseyColor);
               mat.roughness = 0.45;
+              mat.needsUpdate = true;
             } else if (matName.includes('collar') || matName.includes('trim') || meshName.includes('collar')) {
+              mat.map = null;
               mat.color.setHex(style.trimColor);
               mat.roughness = 0.45;
+              mat.needsUpdate = true;
             } else if (matName.includes('short') || matName.includes('pant') || meshName.includes('short')) {
+              mat.map = null;
               mat.color.setHex(style.shortsColor);
               mat.roughness = 0.55;
+              mat.needsUpdate = true;
             } else if (matName.includes('sock') || meshName.includes('sock')) {
+              mat.map = null;
               mat.color.setHex(style.sockColor);
               mat.roughness = 0.6;
+              mat.needsUpdate = true;
             } else if (matName.includes('boot') || meshName.includes('boot')) {
+              mat.map = null;
               mat.color.setHex(0x111827); // Realistic cleats
               mat.roughness = 0.35;
+              mat.needsUpdate = true;
             } else if (matName.includes('skin') || meshName.includes('body')) {
               mat.color.setHex(style.skinColor);
               mat.roughness = 0.7;
@@ -821,7 +846,7 @@ export class MatchSimulation {
   } {
     const root = new THREE.Group();
     const body = new THREE.Group();
-    body.scale.set(1.10, 1.30, 1.10); // +10% athlete scale
+    body.scale.set(isKeeper ? 1.55 : 1.32, isKeeper ? 1.85 : 1.56, isKeeper ? 1.55 : 1.32); // Field +20%, GK imposing
     root.add(body);
 
     const {
@@ -1678,7 +1703,7 @@ export class MatchSimulation {
     if (p.role === 'GK') {
       // Both goalkeepers anticipate incoming shots, dive laterally, and parry/clear the ball
       const incomingShot =
-        this.ballVel.x * attackDir < -0.22 && Math.abs(this.ballPos.x - ownGoalX) < 0.68;
+        this.ballVel.x * attackDir < -0.22 && Math.abs(this.ballPos.x - ownGoalX) < 1.35;
       let clampedZ = THREE.MathUtils.clamp(
         this.ballPos.z * 0.82,
         -GOAL_WIDTH * 0.36,
@@ -1689,13 +1714,13 @@ export class MatchSimulation {
         const timeToGoal = THREE.MathUtils.clamp(
           Math.abs(ownGoalX - this.ballPos.x) / Math.max(0.25, Math.abs(this.ballVel.x)),
           0,
-          0.55
+          0.85
         );
         const predictedZ = this.ballPos.z + this.ballVel.z * timeToGoal;
-        clampedZ = THREE.MathUtils.clamp(predictedZ, -GOAL_WIDTH * 0.42, GOAL_WIDTH * 0.42);
+        clampedZ = THREE.MathUtils.clamp(predictedZ, -GOAL_WIDTH * 0.44, GOAL_WIDTH * 0.44);
 
-        if (p.diveTimer <= 0 && p.kickCooldown <= 0 && Math.abs(this.ballPos.x - ownGoalX) < 0.56) {
-          p.diveTimer = 0.42;
+        if (p.diveTimer <= 0 && p.kickCooldown <= 0 && Math.abs(this.ballPos.x - ownGoalX) < 1.20) {
+          p.diveTimer = 0.50;
           p.diveDir = Math.abs(clampedZ - p.pos.z) > 0.02 ? Math.sign(clampedZ - p.pos.z) : 0;
         }
       }
@@ -1839,7 +1864,7 @@ export class MatchSimulation {
       // Blue teammates push into attack while keeping a compact central defensive block in front of goal
       const relHomeX = p.homePos.x * attackDir;
       const relBallX = this.ballPos.x * attackDir;
-      if (p.role === 'FWD_L' || p.role === 'FWD_R') {
+      if (p.role === 'FWD_L' || p.role === 'FWD_C' || p.role === 'FWD_R') {
         const baseAdv = relHomeX + relBallX * 0.82 + 0.30;
         const rawX = relBallX > -0.15 ? Math.max(baseAdv, relBallX + 0.20) : baseAdv;
         target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.20, HALF_LENGTH - 0.12) * attackDir;
@@ -1848,8 +1873,8 @@ export class MatchSimulation {
           -HALF_WIDTH + 0.07,
           HALF_WIDTH - 0.07
         );
-      } else if (p.role === 'MID_C') {
-        // Central holding midfielder screens the top of the penalty box
+      } else if (p.role === 'MID_D' || p.role === 'MID_C') {
+        // Central holding / defensive midfielder screens the top of the penalty box
         if (relBallX < 0) {
           target.x = THREE.MathUtils.clamp(relHomeX + relBallX * 0.45, -HALF_LENGTH + 0.24, -0.08) * attackDir;
           target.z = THREE.MathUtils.clamp(this.ballPos.z * 0.52, -0.28, 0.28);
@@ -1871,29 +1896,29 @@ export class MatchSimulation {
           HALF_WIDTH - 0.07
         );
       } else {
-        // PES 5 Center-backs (DEF_L / DEF_R): Modern fluid defensive line
-        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * (HALF_WIDTH * 0.35);
+        // PES 5 Back Line (LB, CB_L, CB_R, RB): Fluid zonal defense tracking each defender's lane
+        const slotZ = p.homePos.z;
         if (relBallX > 0.20) {
           // Team is attacking in opponent half: push defensive line up to compress midfield!
           target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.28 + (relBallX - 0.20) * 0.35, -HALF_LENGTH * 0.45, -0.05) * attackDir;
-          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.22, -HALF_WIDTH * 0.65, HALF_WIDTH * 0.65);
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.22, -HALF_WIDTH * 0.75, HALF_WIDTH * 0.75);
         } else if (relBallX > -HALF_LENGTH * 0.45) {
           // Ball in midfield: hold defensive line at mid-defensive third
           target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.42 + relBallX * 0.25, -HALF_LENGTH * 0.60, -HALF_LENGTH * 0.25) * attackDir;
-          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.38, -HALF_WIDTH * 0.75, HALF_WIDTH * 0.75);
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.38, -HALF_WIDTH * 0.82, HALF_WIDTH * 0.82);
         } else {
           // Deep defense (ball in final third): drop in front of penalty box (NEVER inside small box!)
           const minDefDistFromGoal = 0.50;
           const goalSideX = Math.max(relBallX - 0.20, -HALF_LENGTH + minDefDistFromGoal);
           target.x = goalSideX * attackDir;
-          target.z = THREE.MathUtils.clamp(slotZ * 0.75 + this.ballPos.z * 0.50, -HALF_WIDTH * 0.50, HALF_WIDTH * 0.50);
+          target.z = THREE.MathUtils.clamp(slotZ * 0.75 + this.ballPos.z * 0.50, -HALF_WIDTH * 0.55, HALF_WIDTH * 0.55);
         }
       }
     } else {
       // Red AI role-based off-ball tactical shift across the pitch
       const relHomeX = p.homePos.x * attackDir;
       const relBallX = this.ballPos.x * attackDir;
-      if (p.role === 'FWD_L' || p.role === 'FWD_R') {
+      if (p.role === 'FWD_L' || p.role === 'FWD_C' || p.role === 'FWD_R') {
         const pushBonus = relBallX > 0 ? 0.30 : 0;
         const rawX =
           relBallX > -0.15
@@ -1905,7 +1930,7 @@ export class MatchSimulation {
           -HALF_WIDTH + 0.08,
           HALF_WIDTH - 0.08
         );
-      } else if (p.role === 'MID_L' || p.role === 'MID_C' || p.role === 'MID_R') {
+      } else if (p.role === 'MID_L' || p.role === 'MID_D' || p.role === 'MID_C' || p.role === 'MID_R') {
         const pushBonus = relBallX > 0 ? 0.24 : -0.06;
         target.x =
           THREE.MathUtils.clamp(relHomeX + relBallX * 0.70 + pushBonus, -HALF_LENGTH + 0.20, HALF_LENGTH * 0.68) *
@@ -1916,26 +1941,27 @@ export class MatchSimulation {
           HALF_WIDTH - 0.08
         );
       } else {
-        // Red center-backs: identical PES 5 defensive line logic
-        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * (HALF_WIDTH * 0.35);
+        // Red back line (LB, CB_L, CB_R, RB): identical PES 5 defensive line logic
+        const slotZ = p.homePos.z;
         if (relBallX > 0.20) {
           target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.28 + (relBallX - 0.20) * 0.35, -HALF_LENGTH * 0.45, -0.05) * attackDir;
-          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.22, -HALF_WIDTH * 0.65, HALF_WIDTH * 0.65);
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.22, -HALF_WIDTH * 0.75, HALF_WIDTH * 0.75);
         } else if (relBallX > -HALF_LENGTH * 0.45) {
           target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.42 + relBallX * 0.25, -HALF_LENGTH * 0.60, -HALF_LENGTH * 0.25) * attackDir;
-          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.38, -HALF_WIDTH * 0.75, HALF_WIDTH * 0.75);
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.38, -HALF_WIDTH * 0.82, HALF_WIDTH * 0.82);
         } else {
           const minDefDistFromGoal = 0.50;
           const goalSideX = Math.max(relBallX - 0.20, -HALF_LENGTH + minDefDistFromGoal);
           target.x = goalSideX * attackDir;
-          target.z = THREE.MathUtils.clamp(slotZ * 0.75 + this.ballPos.z * 0.50, -HALF_WIDTH * 0.50, HALF_WIDTH * 0.50);
+          target.z = THREE.MathUtils.clamp(slotZ * 0.75 + this.ballPos.z * 0.50, -HALF_WIDTH * 0.55, HALF_WIDTH * 0.55);
         }
       }
     }
 
     // Maintain spacing from nearby teammates while keeping center-backs compact
     if (p.role !== 'GK' && !(isPresser && p.team === TEAM_RED)) {
-      const minSpace = p.role === 'DEF_L' || p.role === 'DEF_R' ? 0.10 : 0.18;
+      const isDefender = p.role.startsWith('DEF_');
+      const minSpace = isDefender ? 0.10 : 0.18;
       for (const mate of this.players) {
         if (mate === p || mate.team !== p.team) continue;
         const sx = p.pos.x - mate.pos.x;
@@ -2097,53 +2123,37 @@ export class MatchSimulation {
             this.ballVel.z = p.vel.z;
           }
         }
-      } else if (p.team === TEAM_RED && dist < contactDist) {
-        const nx = dist > 0.0001 ? dx / dist : Math.cos(p.facingAngle);
-        const nz = dist > 0.0001 ? dz / dist : -Math.sin(p.facingAngle);
+      } else if (p.team === TEAM_RED) {
+        if (this.ballFreeTimer > 0) continue;
+        const redCaptureDist = contactDist + 0.012;
+        if (dist < redCaptureDist) {
+          // If contesting Blue is very close, both fight for it
+          const contestingBlue = this.players.find(
+            (b) =>
+              b.team === TEAM_BLUE &&
+              Math.hypot(this.ballPos.x - b.pos.x, this.ballPos.z - b.pos.z) < contactDist
+          );
 
-        // If Red contests while ANY Blue player is also in contact (50/50 contest), pop the ball free
-        const contestingBlue = this.players.find(
-          (b) =>
-            b.team === TEAM_BLUE &&
-            Math.hypot(this.ballPos.x - b.pos.x, this.ballPos.z - b.pos.z) < blueCaptureDist
-        );
-
-        if (contestingBlue) {
-          this.ballFreeTimer = 0.24;
-          contestingBlue.kickCooldown = 0.30;
-          p.kickCooldown = 0.28;
-          const sideSign = this.ballPos.z >= 0 ? -1 : 1;
-          this.ballPos.x = p.pos.x + nx * (contactDist + 0.002);
-          this.ballPos.z = p.pos.z + nz * (contactDist + 0.002);
-          this.ballVel.x = nx * 0.22;
-          this.ballVel.z = nz * 0.22 + sideSign * 0.15;
-          this.ballVel.y = 0.11;
-        } else {
-          // Red AI dribbles toward target goal without pushing ball backward
-          const attackDir = this.getAttackDir(p.team);
-          const gx = attackDir * HALF_LENGTH - p.pos.x;
-          const gz = -p.pos.z;
-          const gd = Math.hypot(gx, gz) || 1;
-          const gnx = gx / gd;
-          const gnz = gz / gd;
-
-          if (nx * attackDir < -0.15) {
-            // Ball ended up behind Red player; guide it laterally around toward target goal
-            const sideSign = nz >= 0 ? 1 : -1;
-            const guideX = attackDir * 0.35;
-            const guideZ = sideSign * 0.94;
-            this.ballPos.x = p.pos.x + guideX * (contactDist + 0.002);
-            this.ballPos.z = p.pos.z + guideZ * (contactDist + 0.002);
-            this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, gnx * 0.16, 0.58);
-            this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, gnz * 0.16 + sideSign * 0.08, 0.58);
+          if (contestingBlue) {
+            this.ballFreeTimer = 0.20;
+            contestingBlue.kickCooldown = 0.28;
+            p.kickCooldown = 0.28;
+            const nx = dist > 0.0001 ? dx / dist : Math.cos(p.facingAngle);
+            const nz = dist > 0.0001 ? dz / dist : -Math.sin(p.facingAngle);
+            const sideSign = this.ballPos.z >= 0 ? -1 : 1;
+            this.ballPos.x = p.pos.x + nx * (contactDist + 0.002);
+            this.ballPos.z = p.pos.z + nz * (contactDist + 0.002);
+            this.ballVel.x = nx * 0.22;
+            this.ballVel.z = nz * 0.22 + sideSign * 0.15;
+            this.ballVel.y = 0.08;
           } else {
-            // Push ball cleanly outside player body toward attack path
-            this.ballPos.x = p.pos.x + nx * (contactDist + 0.001);
-            this.ballPos.z = p.pos.z + nz * (contactDist + 0.001);
-            const dribbleX = gnx * 0.11 + p.vel.x * 1.0;
-            const dribbleZ = gnz * 0.11 + p.vel.z * 1.0;
-            this.ballVel.x = THREE.MathUtils.lerp(this.ballVel.x, dribbleX, 0.58);
-            this.ballVel.z = THREE.MathUtils.lerp(this.ballVel.z, dribbleZ, 0.58);
+            // Firm controlled dribbling matching Blue player!
+            const targetX = p.pos.x + Math.cos(p.facingAngle) * leadDist;
+            const targetZ = p.pos.z - Math.sin(p.facingAngle) * leadDist;
+            this.ballPos.x = THREE.MathUtils.lerp(this.ballPos.x, targetX, 0.60);
+            this.ballPos.z = THREE.MathUtils.lerp(this.ballPos.z, targetZ, 0.60);
+            this.ballVel.x = p.vel.x;
+            this.ballVel.z = p.vel.z;
           }
         }
       }
@@ -2454,9 +2464,16 @@ export class MatchSimulation {
         p.mixer.update(dt);
       }
 
-      p.glbGroup.position.y = 0;
-      p.glbGroup.rotation.x = 0;
-      p.glbGroup.rotation.z = 0;
+      if (p.role === 'GK' && p.diveTimer > 0) {
+        const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.50, 0, 1) * Math.PI);
+        p.glbGroup.position.y = diveArc * 0.075; // Leaps 7.5cm into air
+        p.glbGroup.rotation.x = this.getAttackDir(p.team) * p.diveDir * diveArc * 0.55;
+        p.glbGroup.rotation.z = 0;
+      } else {
+        p.glbGroup.position.y = 0;
+        p.glbGroup.rotation.x = 0;
+        p.glbGroup.rotation.z = 0;
+      }
       return;
     }
 

@@ -17,8 +17,8 @@ export const GOAL_HEIGHT = 0.16;
 export const GOAL_DEPTH = 0.15;
 export const GOAL_POST_RADIUS = 0.009;
 
-export const PLAYER_RADIUS = 0.0205;
-export const PLAYER_HEIGHT = 0.066;
+export const PLAYER_RADIUS = 0.0245;
+export const PLAYER_HEIGHT = 0.079;
 export const BALL_RADIUS = 0.0081;
 
 export const DEFAULT_DIORAMA_POS = {

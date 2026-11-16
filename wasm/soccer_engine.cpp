@@ -8,7 +8,7 @@ extern "C" {
 
 namespace {
 
-constexpr int NUM_PLAYERS = 16;
+constexpr int NUM_PLAYERS = 22;
 constexpr int PLAYER_STRIDE = 12;
 constexpr int BALL_BUF_LEN = 16;
 
@@ -17,12 +17,26 @@ constexpr int TEAM_RED = 1;
 
 constexpr int ROLE_GK = 0;
 constexpr int ROLE_DEF_L = 1;
-constexpr int ROLE_DEF_R = 2;
-constexpr int ROLE_MID_L = 3;
-constexpr int ROLE_MID_C = 4;
-constexpr int ROLE_MID_R = 5;
-constexpr int ROLE_FWD_L = 6;
-constexpr int ROLE_FWD_R = 7;
+constexpr int ROLE_DEF_CL = 2;
+constexpr int ROLE_DEF_CR = 3;
+constexpr int ROLE_DEF_R = 4;
+constexpr int ROLE_MID_D = 5;
+constexpr int ROLE_MID_L = 6;
+constexpr int ROLE_MID_C = 7;
+constexpr int ROLE_MID_R = 8;
+constexpr int ROLE_FWD_L = 9;
+constexpr int ROLE_FWD_C = 10;
+constexpr int ROLE_FWD_R = 11;
+
+inline bool is_def_role(int role) {
+  return role >= ROLE_DEF_L && role <= ROLE_DEF_R;
+}
+inline bool is_mid_role(int role) {
+  return role >= ROLE_MID_D && role <= ROLE_MID_R;
+}
+inline bool is_fwd_role(int role) {
+  return role >= ROLE_FWD_L && role <= ROLE_FWD_R;
+}
 
 constexpr float FIELD_LENGTH = 3.80f;
 constexpr float FIELD_WIDTH = 2.40f;
@@ -34,7 +48,7 @@ constexpr float GOAL_HEIGHT = 0.16f;
 constexpr float GOAL_DEPTH = 0.15f;
 constexpr float GOAL_POST_RADIUS = 0.009f;
 
-constexpr float PLAYER_RADIUS = 0.0205f;
+constexpr float PLAYER_RADIUS = 0.0245f;
 constexpr float BALL_RADIUS = 0.0081f;
 
 constexpr float GRAVITY = -2.65f;
@@ -343,7 +357,7 @@ void wasm_step_tactical_ai(
     const float* p = &g_players[i * PLAYER_STRIDE];
     if ((int)p[10] != TEAM_BLUE) continue;
     const int role = (int)p[11];
-    if (role == ROLE_GK || role == ROLE_DEF_L || role == ROLE_DEF_R) continue;
+    if (role == ROLE_GK || is_def_role(role)) continue;
     const float d = hypotf_fast(p[0] - spotX, p[1] - spotZ);
     if (d < bestSpotDist) {
       bestSpotDist = d;
@@ -384,20 +398,20 @@ void wasm_step_tactical_ai(
     const float distBall = hypotf_fast(bx - p[0], bz - p[1]);
 
     if (role == ROLE_GK) {
-      const bool incomingShot = (bvx * attackDir < -0.22f) && (absf(bx - ownGoalX) < 0.68f);
+      const bool incomingShot = (bvx * attackDir < -0.22f) && (absf(bx - ownGoalX) < 1.35f);
       float clampedZ = clampf(bz * 0.82f, -GOAL_WIDTH * 0.36f, GOAL_WIDTH * 0.36f);
 
       if (incomingShot) {
         const float timeToGoal = clampf(
           absf(ownGoalX - bx) / maxf(0.25f, absf(bvx)),
           0.0f,
-          0.55f
+          0.85f
         );
         const float predictedZ = bz + bvz * timeToGoal;
-        clampedZ = clampf(predictedZ, -GOAL_WIDTH * 0.42f, GOAL_WIDTH * 0.42f);
+        clampedZ = clampf(predictedZ, -GOAL_WIDTH * 0.44f, GOAL_WIDTH * 0.44f);
 
-        if (p[8] <= 0.0f && p[7] <= 0.0f && absf(bx - ownGoalX) < 0.56f) {
-          p[8] = 0.42f;
+        if (p[8] <= 0.0f && p[7] <= 0.0f && absf(bx - ownGoalX) < 1.20f) {
+          p[8] = 0.50f;
           const float dzDive = clampedZ - p[1];
           p[9] = absf(dzDive) > 0.02f ? (dzDive > 0.0f ? 1.0f : -1.0f) : 0.0f;
         }
@@ -553,12 +567,12 @@ void wasm_step_tactical_ai(
       } else {
         const float relHomeX = p[4] * attackDir;
         const float relBallX = bx * attackDir;
-        if (role == ROLE_FWD_L || role == ROLE_FWD_R) {
+        if (is_fwd_role(role)) {
           const float baseAdv = relHomeX + relBallX * 0.82f + 0.30f;
           const float rawX = relBallX > -0.15f ? maxf(baseAdv, relBallX + 0.20f) : baseAdv;
           targetX = clampf(rawX, -HALF_LENGTH + 0.20f, HALF_LENGTH - 0.12f) * attackDir;
           targetZ = clampf(p[5] * 0.88f + bz * 0.32f, -HALF_WIDTH + 0.07f, HALF_WIDTH - 0.07f);
-        } else if (role == ROLE_MID_C) {
+        } else if (role == ROLE_MID_D || role == ROLE_MID_C) {
           if (relBallX < 0.0f) {
             targetX = clampf(relHomeX + relBallX * 0.45f, -HALF_LENGTH + 0.24f, -0.08f) * attackDir;
             targetZ = clampf(bz * 0.52f, -0.28f, 0.28f);
@@ -572,8 +586,8 @@ void wasm_step_tactical_ai(
           targetX = clampf(relHomeX + relBallX * 0.72f + pushBonus, -HALF_LENGTH + 0.18f, HALF_LENGTH * 0.68f) * attackDir;
           targetZ = clampf(p[5] * tuckFactor + bz * (relBallX < 0.0f ? 0.28f : 0.35f), -HALF_WIDTH + 0.07f, HALF_WIDTH - 0.07f);
         } else {
-          // PES 5 Center-backs (DEF_L / DEF_R): Modern fluid defensive line
-          const float slotZ = (role == ROLE_DEF_L ? -1.0f : 1.0f) * (HALF_WIDTH * 0.35f);
+          // PES 5 Back Line (LB, CB_L, CB_R, RB): Fluid zonal defense tracking each defender's lane
+          const float slotZ = p[5];
           if (relBallX > 0.20f) {
             targetX = clampf(-HALF_LENGTH * 0.28f + (relBallX - 0.20f) * 0.35f, -HALF_LENGTH * 0.45f, -0.05f) * attackDir;
             targetZ = clampf(slotZ + bz * 0.22f, -HALF_WIDTH * 0.65f, HALF_WIDTH * 0.65f);
@@ -596,20 +610,20 @@ void wasm_step_tactical_ai(
         // Interpose between ball/attacker and own goal corridor
         targetX = clampf(lerpf(bx, ownGoalX, 0.34f), -HALF_LENGTH + 0.18f, HALF_LENGTH - 0.18f);
         targetZ = clampf(bz * 0.62f, -HALF_WIDTH + 0.08f, HALF_WIDTH - 0.08f);
-      } else if (role == ROLE_FWD_L || role == ROLE_FWD_R) {
+      } else if (is_fwd_role(role)) {
         const float pushBonus = relBallX > 0.0f ? 0.26f : 0.0f;
         const float rawX = relBallX > -0.15f
           ? maxf(relHomeX + relBallX * 0.78f + pushBonus, relBallX + 0.18f)
           : relHomeX + relBallX * 0.72f;
         targetX = clampf(rawX, -HALF_LENGTH + 0.18f, HALF_LENGTH - 0.14f) * attackDir;
         targetZ = clampf(p[5] * 0.88f + bz * 0.34f, -HALF_WIDTH + 0.06f, HALF_WIDTH - 0.06f);
-      } else if (role == ROLE_MID_L || role == ROLE_MID_C || role == ROLE_MID_R) {
+      } else if (is_mid_role(role)) {
         const float pushBonus = relBallX > 0.0f ? 0.20f : -0.06f;
         targetX = clampf(relHomeX + relBallX * 0.70f + pushBonus, -HALF_LENGTH + 0.18f, HALF_LENGTH * 0.68f) * attackDir;
         targetZ = clampf(p[5] * 0.90f + bz * 0.36f, -HALF_WIDTH + 0.06f, HALF_WIDTH - 0.06f);
       } else {
-        // Red center-backs: identical PES 5 defensive line logic
-        const float slotZ = (role == ROLE_DEF_L ? -1.0f : 1.0f) * (HALF_WIDTH * 0.35f);
+        // Red back line (LB, CB_L, CB_R, RB): identical PES 5 defensive line logic
+        const float slotZ = p[5];
         if (relBallX > 0.20f) {
           targetX = clampf(-HALF_LENGTH * 0.28f + (relBallX - 0.20f) * 0.35f, -HALF_LENGTH * 0.45f, -0.05f) * attackDir;
           targetZ = clampf(slotZ + bz * 0.22f, -HALF_WIDTH * 0.65f, HALF_WIDTH * 0.65f);
@@ -627,7 +641,7 @@ void wasm_step_tactical_ai(
 
     // Teammate spacing separation
     if (role != ROLE_GK && !(i == redPresserIdx && team == TEAM_RED)) {
-      const float minSpace = (role == ROLE_DEF_L || role == ROLE_DEF_R) ? 0.10f : 0.18f;
+      const float minSpace = is_def_role(role) ? 0.10f : 0.18f;
       for (int m = 0; m < NUM_PLAYERS; ++m) {
         if (m == i) continue;
         const float* mate = &g_players[m * PLAYER_STRIDE];

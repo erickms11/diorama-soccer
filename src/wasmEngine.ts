@@ -1,18 +1,22 @@
 import type * as THREE from 'three';
 import type { PlayerEntity, PlayerRole } from './entities';
 
-export const WASM_NUM_PLAYERS = 16;
+export const WASM_NUM_PLAYERS = 22;
 export const WASM_PLAYER_STRIDE = 12;
 
 const ROLE_TO_CODE: Record<PlayerRole, number> = {
   GK: 0,
   DEF_L: 1,
-  DEF_R: 2,
-  MID_L: 3,
-  MID_C: 4,
-  MID_R: 5,
-  FWD_L: 6,
-  FWD_R: 7,
+  DEF_CL: 2,
+  DEF_CR: 3,
+  DEF_R: 4,
+  MID_D: 5,
+  MID_L: 6,
+  MID_C: 7,
+  MID_R: 8,
+  FWD_L: 9,
+  FWD_C: 10,
+  FWD_R: 11,
 };
 
 interface SoccerWasmExports {
