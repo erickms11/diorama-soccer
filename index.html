@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Diorama Soccer 8x8 — Meta Quest 3 WebXR</title>
+    <script type="module" crossorigin src="./assets/index-Cn8_d9R-.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CYthOfno.css">
+  </head>
+  <body>
+    <div id="hud">
+      <header class="hud-header">
+        <div>
+          <h1>Diorama Soccer 8x8</h1>
+          <p class="subtitle">Estádio de mesa em Realidade Mista e VR (Meta Quest 3 + PC)</p>
+        </div>
+        <div id="scoreboard-dom" class="scoreboard-dom">
+          <span class="team-blue">BRANCO <strong id="score-blue">0</strong></span>
+          <span class="divider">x</span>
+          <span class="team-red"><strong id="score-red">0</strong> PRETO</span>
+          <span id="match-timer" class="timer">03:00</span>
+        </div>
+      </header>
+
+      <div class="xr-actions">
+        <button id="btn-start" class="btn btn-start">
+          Iniciar Jogo
+        </button>
+        <button id="btn-pause" class="btn btn-pause" disabled>
+          Pausar Jogo
+        </button>
+        <button id="btn-ar" class="btn btn-primary" disabled>
+          Entrar em Mixed Reality (Quest 3 Passthrough)
+        </button>
+        <button id="btn-vr" class="btn btn-secondary" disabled>
+          Entrar em VR (Quest 3 Imersivo)
+        </button>
+        <button id="btn-reposition" class="btn btn-outline">
+          Reposicionar Estádio
+        </button>
+        <button id="btn-scale-down" class="btn btn-scale">
+          Diminuir Estádio (-)
+        </button>
+        <button id="btn-scale-up" class="btn btn-scale">
+          Aumentar Estádio (+)
+        </button>
+        <button id="btn-reset" class="btn btn-outline">
+          Reiniciar Partida
+        </button>
+      </div>
+
+      <p id="xr-status" class="xr-status">Verificando suporte WebXR...</p>
+
+      <details class="controls-panel" open>
+        <summary>Controles Estilo PES / Winning Eleven (Meta Quest 3 &amp; PC)</summary>
+        <div class="controls-grid">
+          <div>
+            <h3>Meta Quest 3 (Controles Touch)</h3>
+            <ul>
+              <li><strong>Botão B (Direito):</strong> Chute a Gol com barra de força e curva de efeito (Finalização).</li>
+              <li><strong>Botão A (Direito):</strong> Passe Curto no pé / Desarme em pé na defesa.</li>
+              <li><strong>Grip Direito ou Botão Y (Esquerdo):</strong> Passe em Profundidade no espaço vazio (Passe esticado).</li>
+              <li><strong>Botão X (Esquerdo):</strong> Lançamento alto no ataque / Carrinho na defesa.</li>
+              <li><strong>Gatilho Direito (RT):</strong> Correr (Sprint com condução rápida).</li>
+              <li><strong>Grip / Gatilho Esquerdo (LB):</strong> Trocar de jogador para o mais próximo da bola.</li>
+              <li><strong>Analógico Esquerdo:</strong> Movimentação 360° com condução e inércia do PES.</li>
+              <li><strong>Mover / Posicionar Estádio:</strong> Aponte e segure o <b>Grip</b> para arrastar na mesa; use o Analógico Direito para regular distância e rotação.</li>
+              <li><strong>Menu Esquerdo (≡) / L3:</strong> Pausar / Continuar partida.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>PC Desktop (Teclado)</h3>
+            <ul>
+              <li><strong>WASD / Setas:</strong> Mover jogador 360°.</li>
+              <li><strong>E ou J:</strong> Passe Curto no pé (segure para força).</li>
+              <li><strong>Espaço:</strong> Chute a Gol com barra de força.</li>
+              <li><strong>Q ou Y:</strong> Passe em Profundidade no espaço vazio.</li>
+              <li><strong>R ou C:</strong> Lançamento alto / Carrinho defensivo.</li>
+              <li><strong>Shift:</strong> Correr (Sprint).</li>
+              <li><strong>Tab ou F:</strong> Trocar de jogador.</li>
+              <li><strong>Mouse (arrastar / scroll):</strong> Girar câmera e zoom em volta da mesa.</li>
+              <li><strong>Enter / P:</strong> Iniciar / Pausar partida.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div id="goal-banner" class="goal-banner hidden">GOL!</div>
+
+  </body>
+</html>
+
