@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import './style.css';
+import { matchAudio } from './audio';
 import { DEFAULT_DIORAMA_POS, DEFAULT_DIORAMA_SCALE } from './constants';
 import { MatchSimulation } from './entities';
 import { StadiumDiorama } from './stadium';
@@ -122,6 +123,7 @@ match = new MatchSimulation(stadium.fieldRoot, {
     syncMatchUI();
   },
   onGoal: (team) => {
+    matchAudio.playGoal();
     stadium.triggerGoalCelebration(2.6);
     xrInput.pulseHaptics(0.9, 180);
     goalBannerEl.textContent = team === 0 ? 'GOL DO PRETO/BRANCO!' : 'GOL DO VERDE/BRANCO!';
@@ -132,9 +134,19 @@ match = new MatchSimulation(stadium.fieldRoot, {
     }, 2400);
   },
   onKick: (power) => {
+    matchAudio.playKick(power);
     xrInput.pulseHaptics(0.25 + power * 0.45, 45);
   },
+  onPostHit: () => {
+    matchAudio.playPost();
+  },
+  onWhistle: () => {
+    matchAudio.playWhistle();
+  },
 });
+
+// Preload authentic match audio on user interaction
+window.addEventListener('pointerdown', () => matchAudio.preloadSounds(), { once: true });
 
 // 4. XR & Desktop Input Manager
 xrInput = new XRAndInputManager(renderer, scene, camera, stadium, {

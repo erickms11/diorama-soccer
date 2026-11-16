@@ -26,6 +26,14 @@ interface SoccerWasmExports {
     hasInput: number,
     currentHalf: number
   ) => number;
+  wasm_find_through_pass_target: (
+    passerIdx: number,
+    dirX: number,
+    dirZ: number,
+    currentHalf: number,
+    outTargetXPtr: number,
+    outTargetZPtr: number
+  ) => number;
   wasm_step_tactical_ai: (
     dt: number,
     controlledIdx: number,
@@ -52,6 +60,7 @@ export interface WasmAIStepResult {
 
 export interface WasmBallStepResult {
   goalScoredTeam: -1 | 0 | 1;
+  postHit: boolean;
 }
 
 /**
@@ -226,8 +235,9 @@ export class WasmSoccerEngine {
 
     const rawGoal = Math.round(f32[b + 8]);
     const goalScoredTeam: -1 | 0 | 1 = rawGoal === 0 ? 0 : rawGoal === 1 ? 1 : -1;
+    const postHit = f32[b + 7] > 0.5;
     return {
-      result: { goalScoredTeam },
+      result: { goalScoredTeam, postHit },
       ballSpinY: f32[b + 6],
     };
   }
@@ -246,5 +256,33 @@ export class WasmSoccerEngine {
       hasInput ? 1 : 0,
       currentHalf
     );
+  }
+
+  public findThroughPassTarget(
+    passerIdx: number,
+    dirX: number,
+    dirZ: number,
+    currentHalf: 1 | 2
+  ): { targetIdx: number; targetX: number; targetZ: number } | null {
+    if (!this.exports.wasm_find_through_pass_target) return null;
+    const f32 = this.view();
+    const b = this.ballOffsetFloats;
+    // Use ball buffer temp slots [14, 15] as pointers for outTargetX, outTargetZ
+    const outXByteOffset = (b + 14) * 4;
+    const outZByteOffset = (b + 15) * 4;
+    const targetIdx = this.exports.wasm_find_through_pass_target(
+      passerIdx,
+      dirX,
+      dirZ,
+      currentHalf,
+      outXByteOffset,
+      outZByteOffset
+    );
+    if (targetIdx < 0) return null;
+    return {
+      targetIdx,
+      targetX: f32[b + 14],
+      targetZ: f32[b + 15],
+    };
   }
 }

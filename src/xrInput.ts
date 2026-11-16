@@ -60,6 +60,8 @@ export class XRAndInputManager {
   // Edge-detection for discrete button presses
   private prevSwitchPressed = false;
   private prevPassPressed = false;
+  private prevThroughPressed = false;
+  private prevLobPressed = false;
   private prevTacklePressed = false;
   private prevMenuPressed = false;
   private prevBorderClick = false;
@@ -73,6 +75,8 @@ export class XRAndInputManager {
   private readonly keys = new Set<string>();
   private desktopSwitchQueued = false;
   private desktopPassQueued = false;
+  private desktopThroughQueued = false;
+  private desktopLobQueued = false;
   private desktopTackleQueued = false;
 
   // Scratch math objects
@@ -388,13 +392,18 @@ export class XRAndInputManager {
   private setupKeyboard(): void {
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.code);
-      if (e.code === 'KeyQ' && !e.repeat) {
+      if ((e.code === 'Tab' || e.code === 'KeyF') && !e.repeat) {
+        e.preventDefault();
         this.desktopSwitchQueued = true;
+      }
+      if ((e.code === 'KeyQ' || e.code === 'KeyY') && !e.repeat) {
+        this.desktopThroughQueued = true;
       }
       if ((e.code === 'KeyE' || e.code === 'KeyJ') && !e.repeat) {
         this.desktopPassQueued = true;
       }
-      if ((e.code === 'KeyC' || e.code === 'KeyF') && !e.repeat) {
+      if ((e.code === 'KeyC' || e.code === 'KeyR') && !e.repeat) {
+        this.desktopLobQueued = true;
         this.desktopTackleQueued = true;
       }
       if (e.code === 'Enter' && !e.repeat) {
@@ -402,9 +411,6 @@ export class XRAndInputManager {
       }
       if (e.code === 'KeyP' && !e.repeat) {
         this.callbacks.onPauseToggleRequested?.();
-      }
-      if (e.code === 'KeyR' && !e.repeat) {
-        this.callbacks.onResetRequested?.();
       }
     });
     window.addEventListener('keyup', (e) => {
@@ -579,10 +585,21 @@ export class XRAndInputManager {
     const leftGp = this.getGamepad('left');
     const rightGp = this.getGamepad('right');
 
+    // PES 5 Controller Mapping on Meta Quest Touch:
+    // Right Controller A (4): Short ground pass / Steal
     const passNow = Boolean(rightGp?.buttons[4]?.pressed);
-    const rawKickHeld = Boolean(rightGp?.buttons[5]?.pressed);
-    const tackleNow = Boolean(leftGp?.buttons[4]?.pressed);
-    const switchNow = Boolean(leftGp?.buttons[0]?.pressed || leftSlot?.selecting);
+    // Left Controller X (4): Shoot on goal with power gauge (PES Square)
+    const rawKickHeld = Boolean(leftGp?.buttons[4]?.pressed);
+    // Left Controller Y (5): Through ball into open space (PES Triangle)
+    const throughNow = Boolean(leftGp?.buttons[5]?.pressed);
+    // Right Controller B (5): Lob / Cross in attack, Slide tackle in defense (PES Circle)
+    const lobOrTackleNow = Boolean(rightGp?.buttons[5]?.pressed);
+    // Left Grip (1) or Left Trigger (0): Switch player (PES L1)
+    const switchNow = Boolean(
+      leftGp?.buttons[1]?.pressed || leftGp?.buttons[0]?.pressed || leftSlot?.selecting
+    );
+    // Right Trigger (0): Sprint (PES R1 / RT)
+    const sprint = Boolean(rightGp?.buttons[0]?.pressed || rightSlot?.selecting);
 
     if (
       this.placementMode ||
@@ -591,7 +608,9 @@ export class XRAndInputManager {
       this.suppressGameplayThisFrame
     ) {
       this.prevPassPressed = passNow;
-      this.prevTacklePressed = tackleNow;
+      this.prevThroughPressed = throughNow;
+      this.prevLobPressed = lobOrTackleNow;
+      this.prevTacklePressed = lobOrTackleNow;
       this.prevSwitchPressed = switchNow;
       if (rawKickHeld) {
         this.waitForKickRelease = true;
@@ -606,6 +625,8 @@ export class XRAndInputManager {
         kickHeld: false,
         passPressed: false,
         passHeld: false,
+        throughPressed: false,
+        lobPressed: false,
         tacklePressed: false,
         switchPressed: false,
       };
@@ -629,7 +650,7 @@ export class XRAndInputManager {
 
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
 
-    // Roubar a bola / Tocar: A Button on Right Controller (4) (segurar carrega força do passe)
+    // Passe Curto / Desarme: A Button on Right Controller (4)
     if (this.waitForPassRelease && !passNow) {
       this.waitForPassRelease = false;
     }
@@ -637,22 +658,25 @@ export class XRAndInputManager {
     const passPressed = passHeld && !this.prevPassPressed;
     this.prevPassPressed = passNow;
 
-    // Chute no Gol: B Button on Right Controller (5)
+    // Chute a Gol com barra de força: X Button on Left Controller (4)
     if (this.waitForKickRelease && !rawKickHeld) {
       this.waitForKickRelease = false;
     }
     const kickHeld = this.waitForKickRelease ? false : rawKickHeld;
 
-    // Correr (Sprint): Right Trigger (0)
-    const sprint = Boolean(rightGp?.buttons[0]?.pressed || rightSlot?.selecting);
+    // Passe em Profundidade: Y Button on Left Controller (5)
+    const throughPressed = throughNow && !this.prevThroughPressed;
+    this.prevThroughPressed = throughNow;
 
-    // Trocar de jogador: Left Trigger (0)
+    // Lançamento Alto (Ataque) / Carrinho (Defesa): B Button on Right Controller (5)
+    const lobPressed = lobOrTackleNow && !this.prevLobPressed;
+    const tacklePressed = lobOrTackleNow && !this.prevTacklePressed;
+    this.prevLobPressed = lobOrTackleNow;
+    this.prevTacklePressed = lobOrTackleNow;
+
+    // Trocar de jogador: Left Grip / Trigger
     const switchPressed = switchNow && !this.prevSwitchPressed;
     this.prevSwitchPressed = switchNow;
-
-    // Carrinho: X Button on Left Controller (4)
-    const tacklePressed = tackleNow && !this.prevTacklePressed;
-    this.prevTacklePressed = tackleNow;
 
     return {
       moveX,
@@ -661,6 +685,8 @@ export class XRAndInputManager {
       kickHeld,
       passPressed,
       passHeld,
+      throughPressed,
+      lobPressed,
       tacklePressed,
       switchPressed,
     };
@@ -683,9 +709,13 @@ export class XRAndInputManager {
     const { moveX, moveZ } = this.projectStickToFieldSpace(rawX, rawY);
     const switchPressed = this.desktopSwitchQueued;
     const passPressed = this.desktopPassQueued;
+    const throughPressed = this.desktopThroughQueued;
+    const lobPressed = this.desktopLobQueued;
     const tacklePressed = this.desktopTackleQueued;
     this.desktopSwitchQueued = false;
     this.desktopPassQueued = false;
+    this.desktopThroughQueued = false;
+    this.desktopLobQueued = false;
     this.desktopTackleQueued = false;
 
     return {
@@ -695,6 +725,8 @@ export class XRAndInputManager {
       kickHeld: this.keys.has('Space'),
       passPressed,
       passHeld: this.keys.has('KeyE') || this.keys.has('KeyJ'),
+      throughPressed,
+      lobPressed,
       tacklePressed,
       switchPressed,
     };

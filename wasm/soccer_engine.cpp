@@ -247,6 +247,70 @@ int wasm_find_pass_target(int passerIdx, float dirX, float dirZ, int hasInput, i
   return bestInCone >= 0 ? bestInCone : closestMate;
 }
 
+// PES 5 Through Ball (Passe em Profundidade / Y Button)
+int wasm_find_through_pass_target(
+  int passerIdx,
+  float dirX,
+  float dirZ,
+  int currentHalf,
+  float* outTargetX,
+  float* outTargetZ
+) {
+  if (passerIdx < 0 || passerIdx >= NUM_PLAYERS) return -1;
+  const float* passer = &g_players[passerIdx * PLAYER_STRIDE];
+  const int team = (int)passer[10];
+  const float attackDir = get_attack_dir(team, currentHalf);
+
+  int bestTarget = -1;
+  float bestScore = -1e9f;
+
+  for (int i = 0; i < NUM_PLAYERS; ++i) {
+    if (i == passerIdx) continue;
+    const float* mate = &g_players[i * PLAYER_STRIDE];
+    if ((int)mate[10] != team || (int)mate[11] == ROLE_GK) continue;
+
+    const float fwdDist = (mate[0] - passer[0]) * attackDir;
+    if (fwdDist < -0.06f) continue; // Behind passer
+
+    const float dx = mate[0] - passer[0];
+    const float dz = mate[1] - passer[1];
+    const float dist = hypotf_fast(dx, dz);
+    if (dist < 0.12f || dist > 1.35f) continue;
+
+    const float align = (dx * dirX + dz * dirZ) / dist;
+    if (align < 0.05f) continue;
+
+    // Lead into space ahead of the runner
+    const float leadDist = clampf(0.12f + dist * 0.18f, 0.14f, 0.38f);
+    const float candX = clampf(mate[0] + attackDir * leadDist, -HALF_LENGTH + 0.12f, HALF_LENGTH - 0.12f);
+    const float candZ = clampf(mate[1] + mate[3] * 0.45f, -HALF_WIDTH + 0.08f, HALF_WIDTH - 0.08f);
+
+    float minLaneClearance = 99.0f;
+    for (int j = 0; j < NUM_PLAYERS; ++j) {
+      const float* opp = &g_players[j * PLAYER_STRIDE];
+      if ((int)opp[10] == team) continue;
+      float t = 0.0f;
+      const float laneD = point_to_segment_dist(
+        opp[0], opp[1], passer[0], passer[1], candX, candZ, &t
+      );
+      if (t > 0.05f && t < 0.95f && laneD < minLaneClearance) {
+        minLaneClearance = laneD;
+      }
+    }
+
+    const float laneBonus = minLaneClearance > 0.08f ? minLaneClearance * 2.5f : -1.5f;
+    const float score = align * 1.5f + fwdDist * 1.2f + laneBonus;
+    if (score > bestScore) {
+      bestScore = score;
+      bestTarget = i;
+      if (outTargetX) *outTargetX = candX;
+      if (outTargetZ) *outTargetZ = candZ;
+    }
+  }
+
+  return bestTarget;
+}
+
 void wasm_step_tactical_ai(
   float dt,
   int controlledIdx,
@@ -618,6 +682,7 @@ void wasm_resolve_player_collisions() {
 }
 
 void wasm_step_ball_physics(float dt, int detectGoals, int currentHalf) {
+  g_ball[7] = 0.0f; // Event flags (1 = post, 2 = crossbar)
   g_ball[8] = -1.0f;
 
   float bx = g_ball[0];
@@ -696,15 +761,28 @@ void wasm_step_ball_physics(float dt, int detectGoals, int currentHalf) {
             vx -= 1.7f * dot * nx;
             vz -= 1.7f * dot * nz;
           }
+          g_ball[7] = 1.0f; // Post hit
         }
       }
     }
   }
 
-  // Goal detection & endline cushions
   const bool inGoalMouthZ = absf(bz) < halfG - BALL_RADIUS * 0.3f;
   const bool underCrossbar = by < GOAL_HEIGHT;
 
+  // Crossbar collision
+  for (int xi = -1; xi <= 1; xi += 2) {
+    const float goalLineX = (float)xi * HALF_LENGTH;
+    if (inGoalMouthZ && absf(bx - goalLineX) < BALL_RADIUS + GOAL_POST_RADIUS) {
+      if (absf(by - GOAL_HEIGHT) < BALL_RADIUS + GOAL_POST_RADIUS) {
+        by = GOAL_HEIGHT + BALL_RADIUS + GOAL_POST_RADIUS;
+        if (vy < 0.0f) vy = -vy * 0.72f;
+        g_ball[7] = 2.0f; // Crossbar
+      }
+    }
+  }
+
+  // Goal detection & endline cushions
   if (inGoalMouthZ && underCrossbar) {
     if (absf(bx) > HALF_LENGTH) {
       if (detectGoals) {

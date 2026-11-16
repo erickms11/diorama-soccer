@@ -64,17 +64,21 @@ export interface MatchInputState {
   moveX: number;         // Local field X (-1..1), already camera-relative
   moveZ: number;         // Local field Z (-1..1), already camera-relative
   sprint: boolean;
-  kickHeld: boolean;     // Shoot button held (B button / Space)
-  passPressed: boolean;  // Pass/steal trigger (A button / KeyE / KeyJ)
-  passHeld: boolean;     // Pass button held to charge power (A button / KeyE / KeyJ)
-  tacklePressed: boolean; // Defensive slide tackle / lunge (X button / KeyC / KeyF)
-  switchPressed: boolean; // Switch player (Left Trigger / KeyQ)
+  kickHeld: boolean;     // Shoot button held with power gauge (X button / Space)
+  passPressed: boolean;  // Short ground pass (A button / KeyE / KeyJ)
+  passHeld: boolean;     // Pass button held to charge power
+  throughPressed?: boolean; // PES 5 Through ball into space (Y button / KeyQ)
+  lobPressed?: boolean;     // PES 5 Lob pass / Cross (B button in attack / KeyR)
+  tacklePressed: boolean; // Defensive slide tackle (B button in defense / KeyC / KeyF)
+  switchPressed: boolean; // Switch player (Left Grip / Left Trigger / KeyTab)
 }
 
 export interface MatchCallbacks {
   onScoreChange?: (blue: number, red: number, timeText: string, statusText: string) => void;
   onGoal?: (scoringTeam: 0 | 1) => void;
   onKick?: (power: number) => void;
+  onPostHit?: () => void;
+  onWhistle?: () => void;
 }
 
 const GRAVITY = -3.6;
@@ -299,6 +303,7 @@ export class MatchSimulation {
     this.applyHalfSides();
     this.kickoffTeam = TEAM_BLUE;
     this.resetKickoff();
+    this.callbacks.onWhistle?.();
     this.emitScore();
   }
 
@@ -314,6 +319,7 @@ export class MatchSimulation {
     this.applyHalfSides();
     this.kickoffTeam = TEAM_RED;
     this.resetKickoff();
+    this.callbacks.onWhistle?.();
     this.emitScore();
   }
 
@@ -651,7 +657,6 @@ export class MatchSimulation {
     loader.load(
       './models/player.glb',
       (gltf) => {
-        const tmpColor = new THREE.Color();
         const badgeGeo = new THREE.PlaneGeometry(0.42, 0.42);
 
         for (const p of this.players) {
@@ -661,7 +666,7 @@ export class MatchSimulation {
 
           const glbGroup = new THREE.Group();
           const facingWrapper = new THREE.Group();
-          facingWrapper.scale.setScalar(0.028);
+          facingWrapper.scale.setScalar(0.040);
           facingWrapper.rotation.y = Math.PI / 2;
           facingWrapper.add(clonedScene);
           glbGroup.add(facingWrapper);
@@ -670,12 +675,12 @@ export class MatchSimulation {
 
           clonedScene.traverse((obj) => {
             if ((obj as THREE.Bone).isBone) {
-              if (obj.name === 'UpperLeg.R') bones.upperLegR = obj;
-              else if (obj.name === 'LowerLeg.R') bones.lowerLegR = obj;
-              else if (obj.name === 'Foot.R') bones.footR = obj;
-              else if (obj.name === 'Torso') bones.torso = obj;
-              else if (obj.name === 'UpperArm.L') bones.upperArmL = obj;
-              else if (obj.name === 'UpperArm.R') bones.upperArmR = obj;
+              if (obj.name === 'thigh_r' || obj.name === 'UpperLeg.R') bones.upperLegR = obj;
+              else if (obj.name === 'calf_r' || obj.name === 'LowerLeg.R') bones.lowerLegR = obj;
+              else if (obj.name === 'foot_r' || obj.name === 'Foot.R') bones.footR = obj;
+              else if (obj.name === 'spine_02' || obj.name === 'spine_01' || obj.name === 'Torso') bones.torso = obj;
+              else if (obj.name === 'upperarm_l' || obj.name === 'UpperArm.L') bones.upperArmL = obj;
+              else if (obj.name === 'upperarm_r' || obj.name === 'UpperArm.R') bones.upperArmR = obj;
               return;
             }
 
@@ -691,49 +696,30 @@ export class MatchSimulation {
             const mat = srcMat.clone();
             mat.metalness = 0.04;
 
-            if (mat.name === 'Shirt') {
+            const matName = mat.name.toLowerCase();
+            const meshName = obj.name.toLowerCase();
+
+            if (matName.includes('shirt') || meshName.includes('shirt')) {
               mat.color.setHex(style.jerseyColor);
-              mat.roughness = 0.5;
-            } else if (mat.name === 'Pants') {
-              mat.color.setHex(style.shortsColor);
-              mat.roughness = 0.6;
-            } else if (mat.name === 'Belt') {
+              mat.roughness = 0.45;
+            } else if (matName.includes('collar') || matName.includes('trim') || meshName.includes('collar')) {
               mat.color.setHex(style.trimColor);
-              mat.roughness = 0.48;
-            } else if (mat.name === 'Hair') {
+              mat.roughness = 0.45;
+            } else if (matName.includes('short') || matName.includes('pant') || meshName.includes('short')) {
+              mat.color.setHex(style.shortsColor);
+              mat.roughness = 0.55;
+            } else if (matName.includes('sock') || meshName.includes('sock')) {
+              mat.color.setHex(style.sockColor);
+              mat.roughness = 0.6;
+            } else if (matName.includes('boot') || meshName.includes('boot')) {
+              mat.color.setHex(0x111827); // Realistic cleats
+              mat.roughness = 0.35;
+            } else if (matName.includes('skin') || meshName.includes('body')) {
+              mat.color.setHex(style.skinColor);
+              mat.roughness = 0.7;
+            } else if (matName.includes('eyebrow') || matName.includes('hair')) {
               mat.color.setHex(style.hairColor);
-              mat.roughness = 0.75;
-            } else if (mat.name === 'Skin') {
-              obj.geometry = obj.geometry.clone();
-              const posAttr = obj.geometry.getAttribute('position');
-              if (posAttr) {
-                const count = posAttr.count;
-                const colors = new Float32Array(count * 3);
-                for (let k = 0; k < count; k++) {
-                  const vx = posAttr.getX(k);
-                  const vy = posAttr.getY(k);
-                  let hex = style.skinColor;
-                  if (vy < 0.19) {
-                    hex = 0x111827; // Soccer cleat
-                  } else if (vy < 0.49) {
-                    hex = style.sockColor; // Team sock
-                  } else if (vy < 0.53) {
-                    hex = style.trimColor; // Sock top band
-                  } else if (isKeeper && vy < 2.15 && Math.abs(vx) > 1.24) {
-                    hex = 0xfef08a; // Goalkeeper gloves
-                  } else if (isKeeper && vy < 2.15 && Math.abs(vx) > 0.52) {
-                    hex = style.jerseyColor; // Goalkeeper long sleeves
-                  }
-                  tmpColor.setHex(hex);
-                  colors[k * 3] = tmpColor.r;
-                  colors[k * 3 + 1] = tmpColor.g;
-                  colors[k * 3 + 2] = tmpColor.b;
-                }
-                obj.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-              }
-              mat.vertexColors = true;
-              mat.color.setHex(0xffffff);
-              mat.roughness = 0.65;
+              mat.roughness = 0.8;
             }
 
             obj.material = mat;
@@ -750,7 +736,7 @@ export class MatchSimulation {
                 polygonOffsetFactor: -1,
               })
             );
-            numBadge.position.set(0, 0.24, -0.22);
+            numBadge.position.set(0, 0.16, -0.14);
             numBadge.rotation.y = Math.PI;
             bones.torso.add(numBadge);
           }
@@ -761,7 +747,7 @@ export class MatchSimulation {
             actions[clip.name] = mixer.clipAction(clip);
           }
 
-          const idleAction = actions.Idle;
+          const idleAction = actions.idle ?? actions.Idle ?? Object.values(actions)[0];
           if (idleAction) {
             idleAction.reset().play();
             mixer.update(p.slotIndex * 0.25);
@@ -770,7 +756,7 @@ export class MatchSimulation {
           p.glbGroup = glbGroup;
           p.mixer = mixer;
           p.actions = actions;
-          p.activeActionName = 'Idle';
+          p.activeActionName = idleAction ? idleAction.getClip().name : 'idle';
           p.glbBones = bones;
 
           p.mesh.add(glbGroup);
@@ -1325,8 +1311,27 @@ export class MatchSimulation {
       }
     }
 
+    if (input.throughPressed) {
+      // Button Y (Quest) / Q,Y (PC): PES Through Ball (Passe em Profundidade)
+      if (hasBall || distToBall < PLAYER_RADIUS + BALL_RADIUS + 0.085) {
+        this.performThroughPass(p, input.moveX, input.moveZ);
+        return;
+      }
+    }
+
+    if (input.lobPressed) {
+      // Button B (Quest) / R (PC): Lob Pass when having ball, or Slide Tackle when defending
+      if (hasBall) {
+        this.performLobPass(p, input.moveX, input.moveZ);
+        return;
+      } else if (p.tackleCooldown <= 0) {
+        this.performTackle(p, input.moveX, input.moveZ);
+        return;
+      }
+    }
+
     if (input.tacklePressed) {
-      // Button X (Quest) / C,F (PC): Defensive slide tackle
+      // Button B on defense (Quest) / C,F (PC): Defensive slide tackle
       this.kickCharge = 0;
       this.wasKickHeld = false;
       this.passCharge = 0;
@@ -1338,7 +1343,7 @@ export class MatchSimulation {
     }
 
     if (input.kickHeld) {
-      // Button B (Quest) / Space (PC): Charge shot on goal
+      // Button X (Quest) / Space (PC): Charge shot on goal
       this.kickCharge = Math.min(1, this.kickCharge + dt * 1.85);
       this.wasKickHeld = true;
     } else if (this.wasKickHeld) {
@@ -1441,6 +1446,137 @@ export class MatchSimulation {
     p.kickAnim = 1;
     this.ballFreeTimer = 0.14;
     this.callbacks.onKick?.(0.35 + power * 0.45);
+  }
+
+  private performThroughPass(p: PlayerEntity, aimX = 0, aimZ = 0): void {
+    let dirX = Math.cos(p.facingAngle);
+    let dirZ = -Math.sin(p.facingAngle);
+    const hasInput = Math.hypot(aimX, aimZ) > 0.15;
+    if (hasInput) {
+      const len = Math.hypot(aimX, aimZ);
+      dirX = aimX / len;
+      dirZ = aimZ / len;
+    }
+
+    const attackDir = this.getAttackDir(p.team);
+    let targetX = p.pos.x + dirX * 0.42;
+    let targetZ = p.pos.z + dirZ * 0.42;
+    let targetMate: PlayerEntity | null = null;
+
+    // Use WASM through pass finder if ready
+    const throughTarget = this.wasmEngine?.findThroughPassTarget(
+      p.id,
+      dirX,
+      dirZ,
+      this.currentHalf
+    );
+
+    if (throughTarget && throughTarget.targetIdx >= 0) {
+      targetX = throughTarget.targetX;
+      targetZ = throughTarget.targetZ;
+      targetMate = this.players[throughTarget.targetIdx];
+    } else {
+      let bestScore = -1e9;
+      for (const mate of this.players) {
+        if (mate.team !== p.team || mate.role === 'GK' || mate.id === p.id) continue;
+        const forwardGain = (mate.pos.x - p.pos.x) * attackDir;
+        if (forwardGain < -0.05) continue;
+        const dx = mate.pos.x - p.pos.x;
+        const dz = mate.pos.z - p.pos.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.12) continue;
+        const align = (dx * dirX + dz * dirZ) / dist;
+        if (align < 0.05) continue;
+        const score = align * 2.0 + forwardGain * 1.5 - dist * 0.5;
+        if (score > bestScore) {
+          bestScore = score;
+          targetMate = mate;
+        }
+      }
+      if (targetMate) {
+        const leadDist = THREE.MathUtils.clamp(
+          0.12 + Math.hypot(targetMate.pos.x - p.pos.x, targetMate.pos.z - p.pos.z) * 0.22,
+          0.14,
+          0.38
+        );
+        targetX = THREE.MathUtils.clamp(
+          targetMate.pos.x + attackDir * leadDist,
+          -HALF_LENGTH + 0.12,
+          HALF_LENGTH - 0.12
+        );
+        targetZ = THREE.MathUtils.clamp(
+          targetMate.pos.z + targetMate.vel.z * 0.4,
+          -HALF_WIDTH + 0.08,
+          HALF_WIDTH - 0.08
+        );
+      }
+    }
+
+    const tdx = targetX - this.ballPos.x;
+    const tdz = targetZ - this.ballPos.z;
+    const tdist = Math.hypot(tdx, tdz) || 1;
+    const passDirX = tdx / tdist;
+    const passDirZ = tdz / tdist;
+
+    const launchDist = PLAYER_RADIUS + BALL_RADIUS + 0.003;
+    this.ballPos.x = p.pos.x + passDirX * launchDist;
+    this.ballPos.z = p.pos.z + passDirZ * launchDist;
+    const passSpeed = THREE.MathUtils.clamp(0.68 + tdist * 0.72, 0.75, 1.40);
+    this.ballVel.set(passDirX * passSpeed, 0.03, passDirZ * passSpeed);
+    const sideCross = passDirX * p.vel.z - passDirZ * p.vel.x;
+    this.ballSpinY = THREE.MathUtils.clamp(sideCross * 4.0, -1.8, 1.8);
+
+    p.facingAngle = Math.atan2(-passDirZ, passDirX);
+    p.kickCooldown = 0.32;
+    p.kickAnim = 1;
+    this.ballFreeTimer = 0.16;
+
+    if (targetMate) {
+      this.controlledIndex = targetMate.id;
+      this.autoSwitchCooldown = 0.55;
+    }
+    this.callbacks.onKick?.(0.55);
+  }
+
+  private performLobPass(p: PlayerEntity, aimX = 0, aimZ = 0): void {
+    let dirX = Math.cos(p.facingAngle);
+    let dirZ = -Math.sin(p.facingAngle);
+    if (Math.hypot(aimX, aimZ) > 0.15) {
+      const len = Math.hypot(aimX, aimZ);
+      dirX = aimX / len;
+      dirZ = aimZ / len;
+    }
+
+    const mate = this.findPassTarget(p, dirX, dirZ, true);
+    let targetX = p.pos.x + dirX * 0.65;
+    let targetZ = p.pos.z + dirZ * 0.65;
+    if (mate) {
+      targetX = mate.pos.x + mate.vel.x * 0.25;
+      targetZ = mate.pos.z + mate.vel.z * 0.25;
+      const mateIdx = this.players.indexOf(mate);
+      if (mateIdx !== -1) {
+        this.controlledIndex = mateIdx;
+        this.autoSwitchCooldown = 0.65;
+      }
+    }
+
+    const dx = targetX - this.ballPos.x;
+    const dz = targetZ - this.ballPos.z;
+    const dist = Math.hypot(dx, dz) || 1;
+    const ndx = dx / dist;
+    const ndz = dz / dist;
+
+    const launchDist = PLAYER_RADIUS + BALL_RADIUS + 0.003;
+    this.ballPos.x = p.pos.x + ndx * launchDist;
+    this.ballPos.z = p.pos.z + ndz * launchDist;
+    const speed = THREE.MathUtils.clamp(0.55 + dist * 0.52, 0.60, 1.20);
+    this.ballVel.set(ndx * speed, 0.24 + dist * 0.08, ndz * speed);
+
+    p.facingAngle = Math.atan2(-ndz, ndx);
+    p.kickCooldown = 0.35;
+    p.kickAnim = 1;
+    this.ballFreeTimer = 0.22;
+    this.callbacks.onKick?.(0.65);
   }
 
   private performTackle(p: PlayerEntity, aimX = 0, aimZ = 0): void {
@@ -2075,6 +2211,9 @@ export class MatchSimulation {
       this.ballSpinY = ballSpinY;
       this.ballSphereMesh.rotation.z -= (this.ballVel.x * dt) / BALL_RADIUS;
       this.ballSphereMesh.rotation.x += (this.ballVel.z * dt) / BALL_RADIUS;
+      if (result.postHit) {
+        this.callbacks.onPostHit?.();
+      }
       if (result.goalScoredTeam === 0 || result.goalScoredTeam === 1) {
         this.recordGoal(result.goalScoredTeam);
       }
@@ -2193,21 +2332,30 @@ export class MatchSimulation {
     const speed = Math.hypot(p.vel.x, p.vel.z);
 
     if (p.mixer && p.actions && p.glbGroup) {
-      let targetClip = 'Idle';
+      let targetClip = 'idle';
       if (this.goalResetTimer > 0 && this.lastScorerTeam !== null) {
-        targetClip = p.team === this.lastScorerTeam ? 'Victory' : 'Defeat';
+        targetClip = p.team === this.lastScorerTeam ? 'celebrate' : 'fall';
       } else if (p.diveTimer > 0) {
-        targetClip = 'Jump';
+        targetClip = p.diveDir >= 0 ? 'diveRight' : 'diveLeft';
       } else if (p.tackleTimer > 0) {
-        targetClip = 'Roll';
-      } else if (speed > 0.13) {
-        targetClip = 'Run';
-      } else if (speed > 0.02) {
-        targetClip = 'Walk';
+        targetClip = 'slide';
+      } else if (p.kickAnim > 0) {
+        targetClip = 'shoot';
+      } else if (speed > 0.22) {
+        targetClip = 'sprint';
+      } else if (speed > 0.08) {
+        targetClip = this.controlledIndex === p.id ? 'dribble' : 'jog';
+      } else if (speed > 0.015) {
+        targetClip = 'jog';
       }
 
       if (!p.actions[targetClip]) {
-        targetClip = p.actions.Idle ? 'Idle' : Object.keys(p.actions)[0] ?? '';
+        const found = Object.keys(p.actions).find((k) => k.toLowerCase() === targetClip.toLowerCase());
+        if (found) {
+          targetClip = found;
+        } else {
+          targetClip = p.actions.idle ? 'idle' : p.actions.Idle ? 'Idle' : Object.keys(p.actions)[0] ?? '';
+        }
       }
 
       if (targetClip && p.activeActionName !== targetClip) {
@@ -2227,10 +2375,11 @@ export class MatchSimulation {
 
       const activeAction = p.activeActionName ? p.actions[p.activeActionName] : undefined;
       if (activeAction) {
-        if (p.activeActionName === 'Run') {
-          activeAction.timeScale = THREE.MathUtils.clamp(speed / 0.25, 0.8, 1.45);
-        } else if (p.activeActionName === 'Walk') {
-          activeAction.timeScale = THREE.MathUtils.clamp(speed / 0.1, 0.8, 1.35);
+        const actName = (p.activeActionName ?? '').toLowerCase();
+        if (actName.includes('sprint')) {
+          activeAction.timeScale = THREE.MathUtils.clamp(speed / 0.28, 0.85, 1.4);
+        } else if (actName.includes('jog') || actName.includes('run') || actName.includes('dribble') || actName.includes('walk')) {
+          activeAction.timeScale = THREE.MathUtils.clamp(speed / 0.15, 0.8, 1.45);
         } else {
           activeAction.timeScale = 1.0;
         }
@@ -2240,36 +2389,9 @@ export class MatchSimulation {
         p.mixer.update(dt);
       }
 
-      if (p.diveTimer > 0) {
-        const diveArc = Math.sin(THREE.MathUtils.clamp(p.diveTimer / 0.42, 0, 1) * Math.PI);
-        p.glbGroup.position.y = diveArc * 0.022;
-        p.glbGroup.rotation.x = this.getAttackDir(p.team) * p.diveDir * diveArc * 0.92;
-        p.glbGroup.rotation.z = 0;
-        if (p.glbBones) {
-          p.glbBones.upperArmL?.rotateZ(1.4);
-          p.glbBones.upperArmR?.rotateZ(-1.4);
-        }
-      } else if (p.tackleTimer > 0) {
-        p.glbGroup.position.y = 0.002;
-        p.glbGroup.rotation.x = 0;
-        p.glbGroup.rotation.z = -0.45;
-      } else {
-        p.glbGroup.position.y = 0;
-        p.glbGroup.rotation.x = 0;
-        p.glbGroup.rotation.z = 0;
-
-        if (p.kickAnim > 0 && p.glbBones) {
-          const kickCurve = Math.sin(p.kickAnim * Math.PI);
-          p.glbBones.upperLegR?.rotateX(-kickCurve * 1.15);
-          p.glbBones.lowerLegR?.rotateX(-kickCurve * 0.55);
-          if (p.glbBones.footR) {
-            p.glbBones.footR.position.z += kickCurve * 0.65;
-            p.glbBones.footR.position.y += kickCurve * 0.38;
-            p.glbBones.footR.rotateX(-kickCurve * 0.55);
-          }
-          p.glbBones.torso?.rotateX(-kickCurve * 0.18);
-        }
-      }
+      p.glbGroup.position.y = 0;
+      p.glbGroup.rotation.x = 0;
+      p.glbGroup.rotation.z = 0;
       return;
     }
 
