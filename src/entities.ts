@@ -546,14 +546,14 @@ export class MatchSimulation {
 
   private spawnTeams(): void {
     const formations: Array<{ role: PlayerRole; x: number; z: number }> = [
-      { role: 'GK', x: -HALF_LENGTH + 0.048, z: 0 },
-      { role: 'DEF_L', x: -HALF_LENGTH * 0.70, z: -HALF_WIDTH * 0.20 },
-      { role: 'DEF_R', x: -HALF_LENGTH * 0.70, z: HALF_WIDTH * 0.20 },
-      { role: 'MID_L', x: -HALF_LENGTH * 0.36, z: -HALF_WIDTH * 0.54 },
-      { role: 'MID_C', x: -HALF_LENGTH * 0.42, z: 0 },
-      { role: 'MID_R', x: -HALF_LENGTH * 0.36, z: HALF_WIDTH * 0.54 },
-      { role: 'FWD_L', x: -HALF_LENGTH * 0.14, z: -HALF_WIDTH * 0.28 },
-      { role: 'FWD_R', x: -HALF_LENGTH * 0.14, z: HALF_WIDTH * 0.28 },
+      { role: 'GK', x: -HALF_LENGTH + 0.08, z: 0 },
+      { role: 'DEF_L', x: -HALF_LENGTH * 0.50, z: -HALF_WIDTH * 0.35 },
+      { role: 'DEF_R', x: -HALF_LENGTH * 0.50, z: HALF_WIDTH * 0.35 },
+      { role: 'MID_L', x: -HALF_LENGTH * 0.22, z: -HALF_WIDTH * 0.65 },
+      { role: 'MID_C', x: -HALF_LENGTH * 0.28, z: 0 },
+      { role: 'MID_R', x: -HALF_LENGTH * 0.22, z: HALF_WIDTH * 0.65 },
+      { role: 'FWD_L', x: -HALF_LENGTH * 0.08, z: -HALF_WIDTH * 0.30 },
+      { role: 'FWD_R', x: -HALF_LENGTH * 0.08, z: HALF_WIDTH * 0.30 },
     ];
 
     let id = 0;
@@ -1712,82 +1712,126 @@ export class MatchSimulation {
         this.performKick(p, 0.62, attackDir, clearZ);
       }
     } else if (isPresser && p.team === TEAM_RED) {
-      // Red AI chases the ball, clears corners/pressure, and finishes inside the danger zone
+      // Red AI in possession or pressing: authentic PES 5 decision making
       const toGoalX = goalX - this.ballPos.x;
       const toGoalZ = -this.ballPos.z;
       const toGoalLen = Math.hypot(toGoalX, toGoalZ) || 1;
-      if ((p.pos.x - this.ballPos.x) * attackDir > 0.01 && distBall < 0.09) {
-        // Steer around the ball when caught on its goal-side so CPU never deadlocks pushing backward
+
+      if ((p.pos.x - this.ballPos.x) * attackDir > 0.01 && distBall < 0.12) {
+        // Steer around the ball when caught on its goal-side
         const sideSign = p.pos.z >= this.ballPos.z ? 1 : -1;
         target.set(
-          THREE.MathUtils.clamp(this.ballPos.x - attackDir * 0.048, -HALF_LENGTH + 0.06, HALF_LENGTH - 0.06),
+          THREE.MathUtils.clamp(this.ballPos.x - attackDir * 0.06, -HALF_LENGTH + 0.08, HALF_LENGTH - 0.08),
           0,
-          THREE.MathUtils.clamp(this.ballPos.z + sideSign * 0.048, -HALF_WIDTH + 0.05, HALF_WIDTH - 0.05)
+          THREE.MathUtils.clamp(this.ballPos.z + sideSign * 0.06, -HALF_WIDTH + 0.08, HALF_WIDTH - 0.08)
         );
-      } else if (distBall < 0.06) {
+      } else if (distBall < 0.08) {
+        // Dribble & conduct forward toward attacking goal
         target.set(
-          this.ballPos.x + (toGoalX / toGoalLen) * 0.08,
+          this.ballPos.x + (toGoalX / toGoalLen) * 0.22,
           0,
-          this.ballPos.z + (toGoalZ / toGoalLen) * 0.08
+          this.ballPos.z + (toGoalZ / toGoalLen) * 0.22
         );
       } else {
-        target.set(this.ballPos.x, 0, this.ballPos.z);
+        // Pursuit with lead
+        target.set(
+          THREE.MathUtils.clamp(this.ballPos.x + this.ballVel.x * 0.14, -HALF_LENGTH + 0.08, HALF_LENGTH - 0.08),
+          0,
+          THREE.MathUtils.clamp(this.ballPos.z + this.ballVel.z * 0.14, -HALF_WIDTH + 0.08, HALF_WIDTH - 0.08)
+        );
       }
 
-      if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.028 && p.kickCooldown <= 0 && this.ballPos.y < 0.055) {
+      if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.035 && p.kickCooldown <= 0 && this.ballPos.y < 0.06) {
         const distToGoal = Math.hypot(goalX - this.ballPos.x, -this.ballPos.z);
-        if (distToGoal < 0.48 && Math.abs(this.ballPos.x - goalX) < 0.45) {
+
+        // 1. FINISHING: In dangerous attacking position within 0.95m of goal
+        if (distToGoal < 0.95 && Math.abs(this.ballPos.x - goalX) < 0.90) {
           const blueGK = this.players.find((pl) => pl.team === TEAM_BLUE && pl.role === 'GK');
           const baseCorner = blueGK
-            ? (blueGK.pos.z >= 0 ? -GOAL_WIDTH * 0.22 : GOAL_WIDTH * 0.22)
+            ? (blueGK.pos.z >= 0 ? -GOAL_WIDTH * 0.28 : GOAL_WIDTH * 0.28)
             : 0;
           const targetZ = THREE.MathUtils.clamp(
-            baseCorner + (Math.random() - 0.5) * GOAL_WIDTH * 0.34,
-            -GOAL_WIDTH * 0.35,
-            GOAL_WIDTH * 0.35
+            baseCorner + (Math.random() - 0.5) * GOAL_WIDTH * 0.32,
+            -GOAL_WIDTH * 0.38,
+            GOAL_WIDTH * 0.38
           );
           const dx = goalX - this.ballPos.x;
           const dz = targetZ - this.ballPos.z;
           const d = Math.hypot(dx, dz) || 1;
-          this.performKick(p, 0.56 + Math.random() * 0.16, dx / d, dz / d);
-          p.kickCooldown = 0.58;
+          const shotPower = THREE.MathUtils.clamp(0.55 + (distToGoal / 0.95) * 0.32, 0.55, 0.90);
+          this.performKick(p, shotPower, dx / d, dz / d);
+          p.kickCooldown = 0.65;
         } else {
+          // 2. PASSING: Look for open teammates with a clean passing lane
           const nearPerimeter =
-            Math.abs(this.ballPos.x) > HALF_LENGTH - 0.09 || Math.abs(this.ballPos.z) > HALF_WIDTH - 0.09;
-          const underPressure = this.players.some(
-            (b) =>
-              b.team === TEAM_BLUE &&
-              Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z) < 0.075
-          );
-          if (nearPerimeter || underPressure || Math.random() < 0.035) {
-            let bestMate: PlayerEntity | null = null;
-            let bestScore = -Infinity;
-            for (const mate of this.players) {
-              if (mate === p || mate.team !== TEAM_RED || mate.role === 'GK') continue;
-              const md = Math.hypot(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z);
-              if (md < 0.12 || md > 0.95) continue;
-              const forwardGain = (mate.pos.x - p.pos.x) * attackDir * 2.0;
-              const oppDist = this.players.reduce((minD, opp) => {
-                if (opp.team !== TEAM_BLUE) return minD;
-                return Math.min(minD, Math.hypot(opp.pos.x - mate.pos.x, opp.pos.z - mate.pos.z));
-              }, 99);
-              const score = forwardGain + Math.min(oppDist, 0.25) * 1.4 - md * 0.25;
-              if (score > bestScore) {
-                bestScore = score;
-                bestMate = mate;
-              }
+            Math.abs(this.ballPos.x) > HALF_LENGTH - 0.14 || Math.abs(this.ballPos.z) > HALF_WIDTH - 0.12;
+
+          let underPressure = false;
+          let closestOppDist = 99;
+          for (const opp of this.players) {
+            if (opp.team !== TEAM_BLUE) continue;
+            const od = Math.hypot(opp.pos.x - p.pos.x, opp.pos.z - p.pos.z);
+            if (od < closestOppDist) closestOppDist = od;
+            if (od < 0.16) underPressure = true;
+          }
+
+          let bestMate: PlayerEntity | null = null;
+          let bestScore = -Infinity;
+          for (const mate of this.players) {
+            if (mate === p || mate.team !== TEAM_RED || mate.role === 'GK') continue;
+            const md = Math.hypot(mate.pos.x - p.pos.x, mate.pos.z - p.pos.z);
+            if (md < 0.22 || md > 2.0) continue;
+
+            const forwardGain = (mate.pos.x - p.pos.x) * attackDir;
+
+            // Check clearance of passing lane (raycast against Blue defenders)
+            let laneClearance = 99;
+            for (const opp of this.players) {
+              if (opp.team !== TEAM_BLUE) continue;
+              const vx = mate.pos.x - p.pos.x;
+              const vz = mate.pos.z - p.pos.z;
+              const l2 = vx * vx + vz * vz;
+              const t = THREE.MathUtils.clamp(((opp.pos.x - p.pos.x) * vx + (opp.pos.z - p.pos.z) * vz) / l2, 0, 1);
+              const projX = p.pos.x + t * vx;
+              const projZ = p.pos.z + t * vz;
+              const dLane = Math.hypot(opp.pos.x - projX, opp.pos.z - projZ);
+              if (t > 0.08 && t < 0.92 && dLane < laneClearance) laneClearance = dLane;
             }
-            if (bestMate && ((bestMate.pos.x - p.pos.x) * attackDir > 0.04 || nearPerimeter || underPressure)) {
-              const px = bestMate.pos.x + attackDir * 0.04 - this.ballPos.x;
-              const pz = bestMate.pos.z - this.ballPos.z;
-              const pd = Math.hypot(px, pz) || 1;
-              const passPower = THREE.MathUtils.clamp(0.38 + pd * 0.38, 0.40, 0.72);
-              this.performKick(p, passPower, px / pd, pz / pd);
-              p.kickCooldown = 0.48;
-            } else {
-              this.performKick(p, 0.50, toGoalX / toGoalLen, toGoalZ / toGoalLen);
-              p.kickCooldown = 0.48;
+
+            if (laneClearance < 0.09) continue; // Lane is blocked
+
+            const oppDist = this.players.reduce((minD, opp) => {
+              if (opp.team !== TEAM_BLUE) return minD;
+              return Math.min(minD, Math.hypot(opp.pos.x - mate.pos.x, opp.pos.z - mate.pos.z));
+            }, 99);
+
+            const score = forwardGain * 2.2 + Math.min(oppDist, 0.35) * 1.6 + laneClearance * 1.5 - md * 0.18;
+            if (score > bestScore) {
+              bestScore = score;
+              bestMate = mate;
             }
+          }
+
+          // In PES, only pass if under pressure or an open teammate is in superior position!
+          let shouldPass = false;
+          if (bestMate) {
+            const fwd = (bestMate.pos.x - p.pos.x) * attackDir;
+            if (underPressure && bestScore > -5.0) shouldPass = true;
+            else if (fwd > 0.28 && bestScore > 0.5) shouldPass = true;
+            else if (nearPerimeter && bestScore > -2.0) shouldPass = true;
+          }
+
+          if (shouldPass && bestMate) {
+            const leadDist = THREE.MathUtils.clamp(0.06 + (bestMate.pos.x - p.pos.x) * attackDir * 0.12, 0.04, 0.20);
+            const px = bestMate.pos.x + attackDir * leadDist - this.ballPos.x;
+            const pz = bestMate.pos.z - this.ballPos.z;
+            const pd = Math.hypot(px, pz) || 1;
+            const passPower = THREE.MathUtils.clamp(0.42 + pd * 0.28, 0.45, 0.78);
+            this.performKick(p, passPower, px / pd, pz / pd);
+            p.kickCooldown = 0.52;
+          } else {
+            // NO BLIND KICKS! Dribble and carry the ball forward towards space!
+            p.kickCooldown = 0.0;
           }
         }
       }
@@ -1827,24 +1871,22 @@ export class MatchSimulation {
           HALF_WIDTH - 0.07
         );
       } else {
-        // Center-backs (DEF_L / DEF_R) guard the goal corridor compactly
-        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * 0.085 * attackDir;
-        if (relBallX < 0.15) {
-          const goalSideX = Math.min(relHomeX + relBallX * 0.38, relBallX - 0.14);
-          target.x = THREE.MathUtils.clamp(goalSideX, -HALF_LENGTH + 0.13, -0.18) * attackDir;
-          target.z = THREE.MathUtils.clamp(
-            this.ballPos.z * 0.52 + slotZ,
-            -GOAL_WIDTH * 0.85,
-            GOAL_WIDTH * 0.85
-          );
+        // PES 5 Center-backs (DEF_L / DEF_R): Modern fluid defensive line
+        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * (HALF_WIDTH * 0.35);
+        if (relBallX > 0.20) {
+          // Team is attacking in opponent half: push defensive line up to compress midfield!
+          target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.28 + (relBallX - 0.20) * 0.35, -HALF_LENGTH * 0.45, -0.05) * attackDir;
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.22, -HALF_WIDTH * 0.65, HALF_WIDTH * 0.65);
+        } else if (relBallX > -HALF_LENGTH * 0.45) {
+          // Ball in midfield: hold defensive line at mid-defensive third
+          target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.42 + relBallX * 0.25, -HALF_LENGTH * 0.60, -HALF_LENGTH * 0.25) * attackDir;
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.38, -HALF_WIDTH * 0.75, HALF_WIDTH * 0.75);
         } else {
-          target.x =
-            THREE.MathUtils.clamp(relHomeX + relBallX * 0.35, -HALF_LENGTH + 0.16, -0.16) * attackDir;
-          target.z = THREE.MathUtils.clamp(
-            p.homePos.z * 0.75 + this.ballPos.z * 0.25,
-            -GOAL_WIDTH * 1.05,
-            GOAL_WIDTH * 1.05
-          );
+          // Deep defense (ball in final third): drop in front of penalty box (NEVER inside small box!)
+          const minDefDistFromGoal = 0.50;
+          const goalSideX = Math.max(relBallX - 0.20, -HALF_LENGTH + minDefDistFromGoal);
+          target.x = goalSideX * attackDir;
+          target.z = THREE.MathUtils.clamp(slotZ * 0.75 + this.ballPos.z * 0.50, -HALF_WIDTH * 0.50, HALF_WIDTH * 0.50);
         }
       }
     } else {
@@ -1852,37 +1894,42 @@ export class MatchSimulation {
       const relHomeX = p.homePos.x * attackDir;
       const relBallX = this.ballPos.x * attackDir;
       if (p.role === 'FWD_L' || p.role === 'FWD_R') {
-        const pushBonus = relBallX > 0 ? 0.26 : 0;
+        const pushBonus = relBallX > 0 ? 0.30 : 0;
         const rawX =
           relBallX > -0.15
-            ? Math.max(relHomeX + relBallX * 0.78 + pushBonus, relBallX + 0.18)
+            ? Math.max(relHomeX + relBallX * 0.78 + pushBonus, relBallX + 0.22)
             : relHomeX + relBallX * 0.72;
-        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.18, HALF_LENGTH - 0.14) * attackDir;
+        target.x = THREE.MathUtils.clamp(rawX, -HALF_LENGTH + 0.20, HALF_LENGTH - 0.14) * attackDir;
         target.z = THREE.MathUtils.clamp(
           p.homePos.z * 0.88 + this.ballPos.z * 0.34,
-          -HALF_WIDTH + 0.06,
-          HALF_WIDTH - 0.06
+          -HALF_WIDTH + 0.08,
+          HALF_WIDTH - 0.08
         );
       } else if (p.role === 'MID_L' || p.role === 'MID_C' || p.role === 'MID_R') {
-        const pushBonus = relBallX > 0 ? 0.20 : -0.06;
+        const pushBonus = relBallX > 0 ? 0.24 : -0.06;
         target.x =
-          THREE.MathUtils.clamp(relHomeX + relBallX * 0.70 + pushBonus, -HALF_LENGTH + 0.18, HALF_LENGTH * 0.68) *
+          THREE.MathUtils.clamp(relHomeX + relBallX * 0.70 + pushBonus, -HALF_LENGTH + 0.20, HALF_LENGTH * 0.68) *
           attackDir;
         target.z = THREE.MathUtils.clamp(
           p.homePos.z * 0.90 + this.ballPos.z * 0.36,
-          -HALF_WIDTH + 0.06,
-          HALF_WIDTH - 0.06
+          -HALF_WIDTH + 0.08,
+          HALF_WIDTH - 0.08
         );
       } else {
-        const dropBonus = relBallX < 0 ? -0.18 : 0.10;
-        target.x =
-          THREE.MathUtils.clamp(relHomeX + relBallX * 0.55 + dropBonus, -HALF_LENGTH + 0.14, HALF_LENGTH * 0.25) *
-          attackDir;
-        target.z = THREE.MathUtils.clamp(
-          p.homePos.z + this.ballPos.z * 0.30,
-          -HALF_WIDTH + 0.06,
-          HALF_WIDTH - 0.06
-        );
+        // Red center-backs: identical PES 5 defensive line logic
+        const slotZ = (p.role === 'DEF_L' ? -1 : 1) * (HALF_WIDTH * 0.35);
+        if (relBallX > 0.20) {
+          target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.28 + (relBallX - 0.20) * 0.35, -HALF_LENGTH * 0.45, -0.05) * attackDir;
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.22, -HALF_WIDTH * 0.65, HALF_WIDTH * 0.65);
+        } else if (relBallX > -HALF_LENGTH * 0.45) {
+          target.x = THREE.MathUtils.clamp(-HALF_LENGTH * 0.42 + relBallX * 0.25, -HALF_LENGTH * 0.60, -HALF_LENGTH * 0.25) * attackDir;
+          target.z = THREE.MathUtils.clamp(slotZ + this.ballPos.z * 0.38, -HALF_WIDTH * 0.75, HALF_WIDTH * 0.75);
+        } else {
+          const minDefDistFromGoal = 0.50;
+          const goalSideX = Math.max(relBallX - 0.20, -HALF_LENGTH + minDefDistFromGoal);
+          target.x = goalSideX * attackDir;
+          target.z = THREE.MathUtils.clamp(slotZ * 0.75 + this.ballPos.z * 0.50, -HALF_WIDTH * 0.50, HALF_WIDTH * 0.50);
+        }
       }
     }
 

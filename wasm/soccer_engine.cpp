@@ -24,15 +24,15 @@ constexpr int ROLE_MID_R = 5;
 constexpr int ROLE_FWD_L = 6;
 constexpr int ROLE_FWD_R = 7;
 
-constexpr float FIELD_LENGTH = 2.46f;
-constexpr float FIELD_WIDTH = 1.56f;
+constexpr float FIELD_LENGTH = 3.80f;
+constexpr float FIELD_WIDTH = 2.40f;
 constexpr float HALF_LENGTH = FIELD_LENGTH * 0.5f;
 constexpr float HALF_WIDTH = FIELD_WIDTH * 0.5f;
 
-constexpr float GOAL_WIDTH = 0.44f;
-constexpr float GOAL_HEIGHT = 0.145f;
-constexpr float GOAL_DEPTH = 0.14f;
-constexpr float GOAL_POST_RADIUS = 0.0085f;
+constexpr float GOAL_WIDTH = 0.48f;
+constexpr float GOAL_HEIGHT = 0.16f;
+constexpr float GOAL_DEPTH = 0.15f;
+constexpr float GOAL_POST_RADIUS = 0.009f;
 
 constexpr float PLAYER_RADIUS = 0.0205f;
 constexpr float BALL_RADIUS = 0.0081f;
@@ -438,10 +438,10 @@ void wasm_step_tactical_ai(
         targetZ = clampf(bz + bvz * 0.14f, -HALF_WIDTH + 0.05f, HALF_WIDTH - 0.05f);
       }
 
-      if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.028f && p[7] <= 0.0f && by < 0.055f && g_ball[9] < 0.5f) {
+      if (distBall < PLAYER_RADIUS + BALL_RADIUS + 0.035f && p[7] <= 0.0f && by < 0.06f && g_ball[9] < 0.5f) {
         const float distToGoal = hypotf_fast(goalX - bx, -bz);
-        if (distToGoal < 0.48f && absf(bx - goalX) < 0.45f) {
-          // Finish toward corner away from Blue GK
+        // 1. FINISHING: In dangerous attacking position within 0.95m of goal
+        if (distToGoal < 0.95f && absf(bx - goalX) < 0.90f) {
           float blueGkZ = 0.0f;
           for (int k = 0; k < NUM_PLAYERS; ++k) {
             if ((int)g_players[k * PLAYER_STRIDE + 10] == TEAM_BLUE &&
@@ -450,79 +450,98 @@ void wasm_step_tactical_ai(
               break;
             }
           }
-          const float baseCorner = (blueGkZ >= 0.0f ? -1.0f : 1.0f) * GOAL_WIDTH * 0.24f;
+          const float baseCorner = (blueGkZ >= 0.0f ? -1.0f : 1.0f) * GOAL_WIDTH * 0.28f;
           const float aimTargetZ = clampf(
-            baseCorner + (rand01 - 0.5f) * GOAL_WIDTH * 0.30f,
-            -GOAL_WIDTH * 0.35f,
-            GOAL_WIDTH * 0.35f
+            baseCorner + (rand01 - 0.5f) * GOAL_WIDTH * 0.32f,
+            -GOAL_WIDTH * 0.38f,
+            GOAL_WIDTH * 0.38f
           );
           const float dx = goalX - bx;
           const float dz = aimTargetZ - bz;
           const float d = hypotf_fast(dx, dz) > 0.0001f ? hypotf_fast(dx, dz) : 1.0f;
           g_ball[9] = 1.0f;
-          g_ball[10] = 0.58f + rand01 * 0.16f;
+          g_ball[10] = clampf(0.55f + (distToGoal / 0.95f) * 0.32f, 0.55f, 0.90f);
           g_ball[11] = (float)i;
           g_ball[14] = dx / d;
           g_ball[15] = dz / d;
-          p[7] = 0.58f;
+          p[7] = 0.65f;
         } else {
+          // 2. PASSING: Look for open teammates with a clean passing lane
           const bool nearPerimeter =
-            absf(bx) > HALF_LENGTH - 0.09f || absf(bz) > HALF_WIDTH - 0.09f;
+            absf(bx) > HALF_LENGTH - 0.14f || absf(bz) > HALF_WIDTH - 0.12f;
+
           bool underPressure = false;
+          float closestOppDist = 99.0f;
           for (int b = 0; b < NUM_PLAYERS; ++b) {
             if ((int)g_players[b * PLAYER_STRIDE + 10] != TEAM_BLUE) continue;
-            if (hypotf_fast(g_players[b * PLAYER_STRIDE + 0] - p[0], g_players[b * PLAYER_STRIDE + 1] - p[1]) < 0.08f) {
-              underPressure = true;
-              break;
+            const float od = hypotf_fast(g_players[b * PLAYER_STRIDE + 0] - p[0], g_players[b * PLAYER_STRIDE + 1] - p[1]);
+            if (od < closestOppDist) closestOppDist = od;
+            if (od < 0.16f) underPressure = true;
+          }
+
+          int bestMate = -1;
+          float bestScore = -1e9f;
+          for (int m = 0; m < NUM_PLAYERS; ++m) {
+            if (m == i) continue;
+            const float* mate = &g_players[m * PLAYER_STRIDE];
+            if ((int)mate[10] != TEAM_RED || (int)mate[11] == ROLE_GK) continue;
+            const float md = hypotf_fast(mate[0] - p[0], mate[1] - p[1]);
+            if (md < 0.22f || md > 2.0f) continue;
+
+            const float forwardGain = (mate[0] - p[0]) * attackDir;
+
+            // Check clearance of passing lane (raycast against Blue defenders)
+            float laneClearance = 99.0f;
+            for (int b = 0; b < NUM_PLAYERS; ++b) {
+              if ((int)g_players[b * PLAYER_STRIDE + 10] != TEAM_BLUE) continue;
+              float t = 0.0f;
+              const float ld = point_to_segment_dist(
+                g_players[b * PLAYER_STRIDE + 0], g_players[b * PLAYER_STRIDE + 1],
+                p[0], p[1], mate[0], mate[1], &t
+              );
+              if (t > 0.08f && t < 0.92f && ld < laneClearance) laneClearance = ld;
+            }
+
+            if (laneClearance < 0.09f) continue;
+
+            float oppMinD = 99.0f;
+            for (int b = 0; b < NUM_PLAYERS; ++b) {
+              if ((int)g_players[b * PLAYER_STRIDE + 10] != TEAM_BLUE) continue;
+              const float od = hypotf_fast(g_players[b * PLAYER_STRIDE + 0] - mate[0], g_players[b * PLAYER_STRIDE + 1] - mate[1]);
+              if (od < oppMinD) oppMinD = od;
+            }
+
+            const float score = forwardGain * 2.2f + minf(oppMinD, 0.35f) * 1.6f + laneClearance * 1.5f - md * 0.18f;
+            if (score > bestScore) {
+              bestScore = score;
+              bestMate = m;
             }
           }
-          if (nearPerimeter || underPressure || rand01 < 0.035f) {
-            int bestMate = -1;
-            float bestScore = -1e9f;
-            for (int m = 0; m < NUM_PLAYERS; ++m) {
-              if (m == i) continue;
-              const float* mate = &g_players[m * PLAYER_STRIDE];
-              if ((int)mate[10] != TEAM_RED || (int)mate[11] == ROLE_GK) continue;
-              const float md = hypotf_fast(mate[0] - p[0], mate[1] - p[1]);
-              if (md < 0.12f || md > 0.95f) continue;
 
-              const float forwardGain = (mate[0] - p[0]) * attackDir * 2.0f;
-              float oppMinD = 99.0f;
-              for (int opp = 0; opp < NUM_PLAYERS; ++opp) {
-                if ((int)g_players[opp * PLAYER_STRIDE + 10] != TEAM_BLUE) continue;
-                const float od = hypotf_fast(
-                  g_players[opp * PLAYER_STRIDE + 0] - mate[0],
-                  g_players[opp * PLAYER_STRIDE + 1] - mate[1]
-                );
-                if (od < oppMinD) oppMinD = od;
-              }
-              const float score = forwardGain + minf(oppMinD, 0.25f) * 1.4f - md * 0.25f;
-              if (score > bestScore) {
-                bestScore = score;
-                bestMate = m;
-              }
-            }
+          // In PES, only pass if under pressure or an open teammate is in superior position!
+          bool shouldPass = false;
+          if (bestMate >= 0) {
+            const float fwd = (g_players[bestMate * PLAYER_STRIDE + 0] - p[0]) * attackDir;
+            if (underPressure && bestScore > -5.0f) shouldPass = true;
+            else if (fwd > 0.28f && bestScore > 0.5f) shouldPass = true;
+            else if (nearPerimeter && bestScore > -2.0f) shouldPass = true;
+          }
 
-            if (bestMate >= 0 &&
-                (((g_players[bestMate * PLAYER_STRIDE + 0] - p[0]) * attackDir > 0.04f) ||
-                 nearPerimeter || underPressure)) {
-              const float px = g_players[bestMate * PLAYER_STRIDE + 0] + attackDir * 0.04f - bx;
-              const float pz = g_players[bestMate * PLAYER_STRIDE + 1] - bz;
-              const float pd = hypotf_fast(px, pz) > 0.0001f ? hypotf_fast(px, pz) : 1.0f;
-              g_ball[9] = 1.0f;
-              g_ball[10] = clampf(0.38f + pd * 0.38f, 0.40f, 0.72f);
-              g_ball[11] = (float)i;
-              g_ball[14] = px / pd;
-              g_ball[15] = pz / pd;
-              p[7] = 0.48f;
-            } else {
-              g_ball[9] = 1.0f;
-              g_ball[10] = 0.50f;
-              g_ball[11] = (float)i;
-              g_ball[14] = toGoalX / toGoalLen;
-              g_ball[15] = toGoalZ / toGoalLen;
-              p[7] = 0.48f;
-            }
+          if (shouldPass && bestMate >= 0) {
+            const float* targetMate = &g_players[bestMate * PLAYER_STRIDE];
+            const float leadDist = clampf(0.06f + (targetMate[0] - p[0]) * attackDir * 0.12f, 0.04f, 0.20f);
+            const float px = targetMate[0] + attackDir * leadDist - bx;
+            const float pz = targetMate[1] - bz;
+            const float pd = hypotf_fast(px, pz) > 0.0001f ? hypotf_fast(px, pz) : 1.0f;
+            g_ball[9] = 1.0f;
+            g_ball[10] = clampf(0.42f + pd * 0.28f, 0.45f, 0.78f);
+            g_ball[11] = (float)i;
+            g_ball[14] = px / pd;
+            g_ball[15] = pz / pd;
+            p[7] = 0.52f;
+          } else {
+            // NO BLIND KICKS! Dribble and carry the ball forward towards space!
+            p[7] = 0.0f;
           }
         }
       }
@@ -553,15 +572,19 @@ void wasm_step_tactical_ai(
           targetX = clampf(relHomeX + relBallX * 0.72f + pushBonus, -HALF_LENGTH + 0.18f, HALF_LENGTH * 0.68f) * attackDir;
           targetZ = clampf(p[5] * tuckFactor + bz * (relBallX < 0.0f ? 0.28f : 0.35f), -HALF_WIDTH + 0.07f, HALF_WIDTH - 0.07f);
         } else {
-          // Center-backs (DEF_L / DEF_R): compact central defensive block
-          const float slotZ = (role == ROLE_DEF_L ? -1.0f : 1.0f) * 0.085f * attackDir;
-          if (relBallX < 0.15f) {
-            const float goalSideX = minf(relHomeX + relBallX * 0.38f, relBallX - 0.14f);
-            targetX = clampf(goalSideX, -HALF_LENGTH + 0.13f, -0.18f) * attackDir;
-            targetZ = clampf(bz * 0.52f + slotZ, -GOAL_WIDTH * 0.85f, GOAL_WIDTH * 0.85f);
+          // PES 5 Center-backs (DEF_L / DEF_R): Modern fluid defensive line
+          const float slotZ = (role == ROLE_DEF_L ? -1.0f : 1.0f) * (HALF_WIDTH * 0.35f);
+          if (relBallX > 0.20f) {
+            targetX = clampf(-HALF_LENGTH * 0.28f + (relBallX - 0.20f) * 0.35f, -HALF_LENGTH * 0.45f, -0.05f) * attackDir;
+            targetZ = clampf(slotZ + bz * 0.22f, -HALF_WIDTH * 0.65f, HALF_WIDTH * 0.65f);
+          } else if (relBallX > -HALF_LENGTH * 0.45f) {
+            targetX = clampf(-HALF_LENGTH * 0.42f + relBallX * 0.25f, -HALF_LENGTH * 0.60f, -HALF_LENGTH * 0.25f) * attackDir;
+            targetZ = clampf(slotZ + bz * 0.38f, -HALF_WIDTH * 0.75f, HALF_WIDTH * 0.75f);
           } else {
-            targetX = clampf(relHomeX + relBallX * 0.35f, -HALF_LENGTH + 0.16f, -0.16f) * attackDir;
-            targetZ = clampf(p[5] * 0.75f + bz * 0.25f, -GOAL_WIDTH * 1.05f, GOAL_WIDTH * 1.05f);
+            const float minDefDistFromGoal = 0.50f;
+            const float goalSideX = maxf(relBallX - 0.20f, -HALF_LENGTH + minDefDistFromGoal);
+            targetX = goalSideX * attackDir;
+            targetZ = clampf(slotZ * 0.75f + bz * 0.50f, -HALF_WIDTH * 0.50f, HALF_WIDTH * 0.50f);
           }
         }
       }
@@ -585,9 +608,20 @@ void wasm_step_tactical_ai(
         targetX = clampf(relHomeX + relBallX * 0.70f + pushBonus, -HALF_LENGTH + 0.18f, HALF_LENGTH * 0.68f) * attackDir;
         targetZ = clampf(p[5] * 0.90f + bz * 0.36f, -HALF_WIDTH + 0.06f, HALF_WIDTH - 0.06f);
       } else {
-        const float dropBonus = relBallX < 0.0f ? -0.18f : 0.10f;
-        targetX = clampf(relHomeX + relBallX * 0.55f + dropBonus, -HALF_LENGTH + 0.14f, HALF_LENGTH * 0.25f) * attackDir;
-        targetZ = clampf(p[5] + bz * 0.30f, -HALF_WIDTH + 0.06f, HALF_WIDTH - 0.06f);
+        // Red center-backs: identical PES 5 defensive line logic
+        const float slotZ = (role == ROLE_DEF_L ? -1.0f : 1.0f) * (HALF_WIDTH * 0.35f);
+        if (relBallX > 0.20f) {
+          targetX = clampf(-HALF_LENGTH * 0.28f + (relBallX - 0.20f) * 0.35f, -HALF_LENGTH * 0.45f, -0.05f) * attackDir;
+          targetZ = clampf(slotZ + bz * 0.22f, -HALF_WIDTH * 0.65f, HALF_WIDTH * 0.65f);
+        } else if (relBallX > -HALF_LENGTH * 0.45f) {
+          targetX = clampf(-HALF_LENGTH * 0.42f + relBallX * 0.25f, -HALF_LENGTH * 0.60f, -HALF_LENGTH * 0.25f) * attackDir;
+          targetZ = clampf(slotZ + bz * 0.38f, -HALF_WIDTH * 0.75f, HALF_WIDTH * 0.75f);
+        } else {
+          const float minDefDistFromGoal = 0.50f;
+          const float goalSideX = maxf(relBallX - 0.20f, -HALF_LENGTH + minDefDistFromGoal);
+          targetX = goalSideX * attackDir;
+          targetZ = clampf(slotZ * 0.75f + bz * 0.50f, -HALF_WIDTH * 0.50f, HALF_WIDTH * 0.50f);
+        }
       }
     }
 
