@@ -585,15 +585,15 @@ export class XRAndInputManager {
     const leftGp = this.getGamepad('left');
     const rightGp = this.getGamepad('right');
 
-    // PES 5 Controller Mapping on Meta Quest Touch:
+    // PES 5 Ergonomic Mapping on Meta Quest Touch:
     // Right Controller A (4): Short ground pass / Steal
     const passNow = Boolean(rightGp?.buttons[4]?.pressed);
-    // Left Controller X (4): Shoot on goal with power gauge (PES Square)
-    const rawKickHeld = Boolean(leftGp?.buttons[4]?.pressed);
-    // Left Controller Y (5): Through ball into open space (PES Triangle)
-    const throughNow = Boolean(leftGp?.buttons[5]?.pressed);
-    // Right Controller B (5): Lob / Cross in attack, Slide tackle in defense (PES Circle)
-    const lobOrTackleNow = Boolean(rightGp?.buttons[5]?.pressed);
+    // Right Controller B (5): Shoot on goal with power gauge (User requested Chute no B)
+    const rawKickHeld = Boolean(rightGp?.buttons[5]?.pressed);
+    // Right Grip (1) OR Left Controller Y (5): Through ball into space (Passe em profundidade)
+    const throughNow = Boolean(rightGp?.buttons[1]?.pressed || leftGp?.buttons[5]?.pressed);
+    // Left Controller X (4): Lob / Slide tackle in defense
+    const lobOrTackleNow = Boolean(leftGp?.buttons[4]?.pressed);
     // Left Grip (1) or Left Trigger (0): Switch player (PES L1)
     const switchNow = Boolean(
       leftGp?.buttons[1]?.pressed || leftGp?.buttons[0]?.pressed || leftSlot?.selecting

@@ -29,19 +29,19 @@ constexpr float FIELD_WIDTH = 1.56f;
 constexpr float HALF_LENGTH = FIELD_LENGTH * 0.5f;
 constexpr float HALF_WIDTH = FIELD_WIDTH * 0.5f;
 
-constexpr float GOAL_WIDTH = 0.32f;
-constexpr float GOAL_HEIGHT = 0.12f;
-constexpr float GOAL_DEPTH = 0.095f;
-constexpr float GOAL_POST_RADIUS = 0.0055f;
+constexpr float GOAL_WIDTH = 0.44f;
+constexpr float GOAL_HEIGHT = 0.145f;
+constexpr float GOAL_DEPTH = 0.14f;
+constexpr float GOAL_POST_RADIUS = 0.0085f;
 
 constexpr float PLAYER_RADIUS = 0.0185f;
 constexpr float BALL_RADIUS = 0.0135f;
 
-constexpr float GRAVITY = -3.6f;
-constexpr float BALL_RESTITUTION = 0.58f;
-constexpr float GRASS_FRICTION = 2.15f;
-constexpr float AIR_DRAG = 0.32f;
-constexpr float MAGNUS_FACTOR = 0.44f;
+constexpr float GRAVITY = -2.65f;
+constexpr float BALL_RESTITUTION = 0.62f;
+constexpr float GRASS_FRICTION = 1.70f;
+constexpr float AIR_DRAG = 0.28f;
+constexpr float MAGNUS_FACTOR = 0.48f;
 constexpr float PI_F = 3.14159265f;
 
 // Player layout (12 floats per player):
@@ -612,14 +612,14 @@ void wasm_step_tactical_ai(
     const float dx = targetX - p[0];
     const float dz = targetZ - p[1];
     const float dist = hypotf_fast(dx, dz);
-    float maxSpeed = 0.21f;
+    float maxSpeed = 0.16f;
     if (role == ROLE_GK) {
-      if (p[8] > 0.0f) maxSpeed = (team == TEAM_BLUE) ? 0.34f : 0.29f;
-      else maxSpeed = (team == TEAM_BLUE) ? 0.22f : 0.19f;
+      if (p[8] > 0.0f) maxSpeed = (team == TEAM_BLUE) ? 0.28f : 0.24f;
+      else maxSpeed = (team == TEAM_BLUE) ? 0.18f : 0.15f;
     } else if (team == TEAM_BLUE) {
-      maxSpeed = 0.28f;
+      maxSpeed = 0.20f;
     } else if (i == redPresserIdx) {
-      maxSpeed = 0.25f;
+      maxSpeed = 0.21f;
     }
 
     const float velLerp = (role == ROLE_GK && p[8] > 0.0f) ? minf(1.0f, dt * 13.0f) : minf(1.0f, dt * 7.5f);

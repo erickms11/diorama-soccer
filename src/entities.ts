@@ -81,10 +81,10 @@ export interface MatchCallbacks {
   onWhistle?: () => void;
 }
 
-const GRAVITY = -3.6;
-const BALL_RESTITUTION = 0.58;
-const GRASS_FRICTION = 2.15;
-const AIR_DRAG = 0.32;
+const GRAVITY = -2.65;
+const BALL_RESTITUTION = 0.62;
+const GRASS_FRICTION = 1.70;
+const AIR_DRAG = 0.28;
 
 /**
  * 8v8 soccer simulation running inside `fieldRoot` (where y = 0 is the grass).
@@ -1233,12 +1233,14 @@ export class MatchSimulation {
 
   private updateHumanPlayer(p: PlayerEntity, dt: number, input: MatchInputState): void {
     if (p.tackleTimer > 0) {
-      const slideSpeed = 0.48 * (0.4 + (p.tackleTimer / 0.32) * 0.6);
+      const slideSpeed = 0.34 * (0.4 + (p.tackleTimer / 0.32) * 0.6);
       p.vel.x = Math.cos(p.facingAngle) * slideSpeed;
       p.vel.z = -Math.sin(p.facingAngle) * slideSpeed;
     } else {
       const len = Math.hypot(input.moveX, input.moveZ);
-      const maxSpeed = input.sprint ? 0.41 : 0.30;
+      const normalSpeed = 0.19;
+      const sprintSpeed = 0.29;
+      const maxSpeed = input.sprint ? sprintSpeed : normalSpeed;
 
       if (len > 0.08) {
         const clamped = Math.min(1, len);
@@ -1247,12 +1249,12 @@ export class MatchSimulation {
         const targetVx = dirX * maxSpeed * clamped;
         const targetVz = dirZ * maxSpeed * clamped;
 
-        p.vel.x = THREE.MathUtils.lerp(p.vel.x, targetVx, Math.min(1, dt * 9.5));
-        p.vel.z = THREE.MathUtils.lerp(p.vel.z, targetVz, Math.min(1, dt * 9.5));
+        p.vel.x = THREE.MathUtils.lerp(p.vel.x, targetVx, Math.min(1, dt * 7.0));
+        p.vel.z = THREE.MathUtils.lerp(p.vel.z, targetVz, Math.min(1, dt * 7.0));
         p.facingAngle = Math.atan2(-dirZ, dirX);
       } else {
-        p.vel.x = THREE.MathUtils.lerp(p.vel.x, 0, Math.min(1, dt * 8.5));
-        p.vel.z = THREE.MathUtils.lerp(p.vel.z, 0, Math.min(1, dt * 8.5));
+        p.vel.x = THREE.MathUtils.lerp(p.vel.x, 0, Math.min(1, dt * 6.5));
+        p.vel.z = THREE.MathUtils.lerp(p.vel.z, 0, Math.min(1, dt * 6.5));
       }
     }
 
@@ -1634,12 +1636,12 @@ export class MatchSimulation {
     this.ballPos.x = p.pos.x + dirX * launchDist;
     this.ballPos.z = p.pos.z + dirZ * launchDist;
 
-    const baseSpeed = p.team === TEAM_BLUE ? 0.98 : 0.78;
-    const powerScale = p.team === TEAM_BLUE ? 1.18 : 0.92;
+    const baseSpeed = p.team === TEAM_BLUE ? 0.88 : 0.72;
+    const powerScale = p.team === TEAM_BLUE ? 0.95 : 0.80;
     const speed = baseSpeed + power * powerScale;
     this.ballVel.x = dirX * speed + (hasExplicitAim ? 0 : p.vel.x * 0.25);
     this.ballVel.z = dirZ * speed + (hasExplicitAim ? 0 : p.vel.z * 0.25);
-    this.ballVel.y = 0.07 + power * 0.22;
+    this.ballVel.y = power < 0.25 ? (0.04 + power * 0.22) : (0.18 + power * 0.52);
     const sideCross = dirX * p.vel.z - dirZ * p.vel.x;
     this.ballSpinY = THREE.MathUtils.clamp(sideCross * 8.5, -2.8, 2.8);
 
@@ -1891,16 +1893,16 @@ export class MatchSimulation {
       p.role === 'GK'
         ? p.diveTimer > 0
           ? p.team === TEAM_BLUE
-            ? 0.34
-            : 0.29
+            ? 0.28
+            : 0.24
           : p.team === TEAM_BLUE
-            ? 0.22
-            : 0.19
+            ? 0.18
+            : 0.15
         : p.team === TEAM_BLUE
-          ? 0.28
+          ? 0.20
           : isPresser
-            ? 0.25
-            : 0.21;
+            ? 0.21
+            : 0.16;
     const velLerp = p.role === 'GK' && p.diveTimer > 0 ? Math.min(1, dt * 13) : Math.min(1, dt * 7.5);
 
     if (dist > 0.015) {

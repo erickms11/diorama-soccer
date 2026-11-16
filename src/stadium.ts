@@ -546,11 +546,11 @@ export class StadiumDiorama {
     const w = canvas.width;
     const h = canvas.height;
 
-    // 1. Alternating mowed vertical grass stripes (rich stadium emerald)
+    // 1. Alternating mowed vertical grass stripes (deep authentic stadium emerald turf)
     const stripes = 16;
     const stripeW = w / stripes;
     for (let i = 0; i < stripes; i++) {
-      ctx.fillStyle = i % 2 === 0 ? '#1e7e3e' : '#25964a';
+      ctx.fillStyle = i % 2 === 0 ? '#114220' : '#1a5629';
       ctx.fillRect(i * stripeW, 0, stripeW + 1, h);
     }
 
@@ -612,10 +612,10 @@ export class StadiumDiorama {
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, w, h);
 
-    // 4. Crisp official chalk pitch markings
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.90)';
-    ctx.fillStyle = 'rgba(248, 250, 252, 0.90)';
-    ctx.lineWidth = 8;
+    // 4. Crisp official chalk pitch markings (authentic 11px textured chalk lines)
+    ctx.strokeStyle = 'rgba(252, 252, 252, 0.94)';
+    ctx.fillStyle = 'rgba(252, 252, 252, 0.94)';
+    ctx.lineWidth = 11;
 
     // Outer boundary
     ctx.strokeRect(pad, pad, pw, ph);
@@ -636,10 +636,10 @@ export class StadiumDiorama {
     ctx.fill();
 
     // Penalty areas, 6-yard boxes, penalty spots & D-arcs ("meia-lua")
-    const boxW = pw * 0.15;
-    const boxH = ph * 0.50;
+    const boxW = pw * 0.16;
+    const boxH = ph * 0.58;
     const goalBoxW = pw * 0.055;
-    const goalBoxH = ph * 0.26;
+    const goalBoxH = ph * 0.36;
     const penOffset = pw * 0.105;
     const rArc = pw * 0.075;
     const thetaArc = Math.acos((boxW - penOffset) / rArc);

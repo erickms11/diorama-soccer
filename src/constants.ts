@@ -12,10 +12,10 @@ export const BASE_WIDTH = 3.26;
 export const BASE_DEPTH = 2.34;
 export const PITCH_Y = 0.06; // Height of the grass surface above the tabletop base (y = 0)
 
-export const GOAL_WIDTH = 0.32;
-export const GOAL_HEIGHT = 0.12;
-export const GOAL_DEPTH = 0.095;
-export const GOAL_POST_RADIUS = 0.0055;
+export const GOAL_WIDTH = 0.44;
+export const GOAL_HEIGHT = 0.145;
+export const GOAL_DEPTH = 0.14;
+export const GOAL_POST_RADIUS = 0.0085;
 
 export const PLAYER_RADIUS = 0.0185;
 export const PLAYER_HEIGHT = 0.060;
