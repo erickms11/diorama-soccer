@@ -622,22 +622,38 @@ export class MatchSimulation {
 
     const jerseyColor = isKeeper
       ? team === TEAM_BLUE
-        ? 0x0284c7
-        : 0xd97706
+        ? 0x0284c7 // GK Branco: Azul celeste / Cyan
+        : 0xf97316 // GK Preto: Laranja fluorescente
       : team === TEAM_BLUE
-        ? 0xffffff
-        : 0x15803d;
+        ? 0xffffff // Todo branco
+        : 0x111827; // Todo preto
     const shortsColor = isKeeper
       ? team === TEAM_BLUE
-        ? 0x111827
-        : 0x064e3b
+        ? 0xffffff
+        : 0x111827
       : team === TEAM_BLUE
-        ? 0x111827
-        : 0xffffff;
-    const sockColor = isKeeper ? 0xf8fafc : team === TEAM_BLUE ? 0xf8fafc : 0x166534;
-    const trimColor = isKeeper ? 0xfef08a : team === TEAM_BLUE ? 0x1e293b : 0xffffff;
-    const numTextColor = isKeeper ? '#ffffff' : team === TEAM_BLUE ? '#111827' : '#ffffff';
-    const baseRingColor = team === TEAM_BLUE ? 0xe2e8f0 : 0x22c55e;
+        ? 0xffffff // Todo branco
+        : 0x111827; // Todo preto
+    const sockColor = isKeeper
+      ? team === TEAM_BLUE
+        ? 0xf8fafc
+        : 0x111827
+      : team === TEAM_BLUE
+        ? 0xf8fafc // Todo branco
+        : 0x111827; // Todo preto
+    const trimColor = isKeeper
+      ? team === TEAM_BLUE
+        ? 0x38bdf8
+        : 0xfbbf24
+      : team === TEAM_BLUE
+        ? 0xe2e8f0
+        : 0x374151;
+    const numTextColor = isKeeper
+      ? '#ffffff'
+      : team === TEAM_BLUE
+        ? '#0f172a' // Preto no branco para excelente legibilidade
+        : '#ffffff'; // Branco no preto
+    const baseRingColor = team === TEAM_BLUE ? 0xffffff : 0x475569;
 
     return {
       numStr,
@@ -666,7 +682,7 @@ export class MatchSimulation {
 
           const glbGroup = new THREE.Group();
           const facingWrapper = new THREE.Group();
-          facingWrapper.scale.setScalar(0.040);
+          facingWrapper.scale.setScalar(0.044); // +10% athlete scale
           facingWrapper.rotation.y = Math.PI / 2;
           facingWrapper.add(clonedScene);
           glbGroup.add(facingWrapper);
@@ -805,7 +821,7 @@ export class MatchSimulation {
   } {
     const root = new THREE.Group();
     const body = new THREE.Group();
-    body.scale.set(1.0, 1.18, 1.0);
+    body.scale.set(1.10, 1.30, 1.10); // +10% athlete scale
     root.add(body);
 
     const {

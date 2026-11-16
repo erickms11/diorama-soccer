@@ -34,8 +34,8 @@ constexpr float GOAL_HEIGHT = 0.145f;
 constexpr float GOAL_DEPTH = 0.14f;
 constexpr float GOAL_POST_RADIUS = 0.0085f;
 
-constexpr float PLAYER_RADIUS = 0.0185f;
-constexpr float BALL_RADIUS = 0.0135f;
+constexpr float PLAYER_RADIUS = 0.0205f;
+constexpr float BALL_RADIUS = 0.0081f;
 
 constexpr float GRAVITY = -2.65f;
 constexpr float BALL_RESTITUTION = 0.62f;
